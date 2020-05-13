@@ -61,11 +61,11 @@ required-features = ["fs", "json-format", "yaml-format"]
 
 [[example]]
 name = "reqwest"
-required-features = ["reqwest", "json-format"]
+required-features = ["reqwest", "json-format", "sync"]
 
 [[example]]
 name = "legion"
-required-features = ["ron-format"]
+required-features = ["fs", "ron-format"]
 
 [[example]]
 name = "fetch"
