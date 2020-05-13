@@ -1,6 +1,10 @@
 use {
-    crate::{asset::Asset, Error},
-    alloc::{sync::Arc, vec::Vec},
+    crate::{
+        asset::Asset,
+        sync::{Lock, Ptr},
+        Error,
+    },
+    alloc::vec::Vec,
     core::{
         any::Any,
         cell::UnsafeCell,
@@ -12,7 +16,6 @@ use {
         sync::atomic::{AtomicBool, Ordering},
         task::{Context, Poll, Waker},
     },
-    spin::Mutex,
 };
 
 /// Handle for an asset of type `A` that eventually
@@ -25,7 +28,7 @@ use {
 /// When asset is finally loaded any task that polled `Handle` will be notified.
 #[derive(Clone)]
 pub struct Handle<A: Asset> {
-    state: Arc<State<A>>,
+    state: Ptr<State<A>>,
 }
 
 impl<A> Eq for Handle<A> where A: Asset {}
@@ -52,13 +55,13 @@ where
 }
 
 struct State<A: Asset> {
-    wakers: Mutex<Vec<Waker>>,
+    wakers: Lock<Vec<Waker>>,
     storage: UnsafeCell<MaybeUninit<Result<A, Error<A>>>>,
     set: AtomicBool,
 }
 
-unsafe impl<A> Send for State<A> where A: Asset {}
-unsafe impl<A> Sync for State<A> where A: Asset {}
+unsafe impl<A> Send for State<A> where A: Asset + Send {}
+unsafe impl<A> Sync for State<A> where A: Asset + Sync {}
 
 impl<A> Drop for State<A>
 where
@@ -107,8 +110,8 @@ where
 {
     pub(crate) fn new() -> Self {
         Handle {
-            state: Arc::new(State {
-                wakers: Mutex::default(),
+            state: Ptr::new(State {
+                wakers: Lock::default(),
                 storage: UnsafeCell::new(MaybeUninit::uninit()),
                 set: AtomicBool::new(false),
             }),
@@ -147,7 +150,11 @@ where
 
 #[derive(Clone)]
 pub(crate) struct AnyHandle {
-    state: Arc<dyn Any + Send + Sync>,
+    #[cfg(not(feature = "sync"))]
+    state: Ptr<dyn Any>,
+
+    #[cfg(feature = "sync")]
+    state: Ptr<dyn Any + Send + Sync>,
 }
 
 impl<A> From<Handle<A>> for AnyHandle
@@ -164,7 +171,7 @@ where
 impl AnyHandle {
     pub fn downcast<A: Asset>(self) -> Option<Handle<A>> {
         Some(Handle {
-            state: Arc::downcast(self.state).ok()?,
+            state: Ptr::downcast(self.state).ok()?,
         })
     }
 }

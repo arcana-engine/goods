@@ -10,10 +10,16 @@ mod reqwest;
 #[cfg(all(feature = "reqwest", not(target_arch = "wasm32")))]
 pub use self::reqwest::*;
 
+#[cfg(all(feature = "fetch", target_arch = "wasm32"))]
+mod fetch;
+
+#[cfg(all(feature = "fetch", target_arch = "wasm32"))]
+pub use self::fetch::*;
+
 use {
-    alloc::{sync::Arc, vec::Vec},
+    crate::sync::{BoxFuture, Ptr, Send, Sync},
+    alloc::vec::Vec,
     core::fmt::{self, Debug, Display},
-    futures_core::future::BoxFuture,
 };
 
 /// Error type for `Source`s.
@@ -22,12 +28,20 @@ pub enum SourceError {
     NotFound,
 
     /// Custom source error.
-    #[cfg(feature = "std")]
-    Error(Arc<dyn std::error::Error + Send + Sync>),
+    #[cfg(all(not(feature = "std"), not(feature = "sync")))]
+    Error(Ptr<dyn Display>),
 
     /// Custom source error.
-    #[cfg(not(feature = "std"))]
-    Error(Arc<dyn core::fmt::Display + Send + Sync>),
+    #[cfg(all(not(feature = "std"), not(not(feature = "sync"))))]
+    Error(Ptr<dyn Display + Send + Sync>),
+
+    /// Custom source error.
+    #[cfg(all(feature = "std", not(feature = "sync")))]
+    Error(Ptr<dyn std::error::Error>),
+
+    /// Custom source error.
+    #[cfg(all(feature = "std", feature = "sync"))]
+    Error(Ptr<dyn std::error::Error + Send + Sync>),
 }
 
 impl Debug for SourceError {

@@ -1,0 +1,26 @@
+<html>
+
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
+    <meta http-equiv="cache-control" content="no-cache" />
+</head>
+
+<body>
+    <script type="module">
+        import init from './generated/fetch.js';
+        new Promise(function (resolve, reject) {
+            window.addEventListener("load", () => {
+                init('./generated/fetch_bg.wasm').then((m) => resolve(m));
+            })
+        })
+            .then(m => {
+                try {
+                    m.run();
+                } catch (err) {
+                    console.error(`Exception catched: ${err}`)
+                }
+            });
+    </script>
+</body>
+
+</html>

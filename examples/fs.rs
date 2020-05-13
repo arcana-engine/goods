@@ -1,3 +1,6 @@
+#[cfg(target_arch = "wasm32")]
+core::compile_error!("This example cannot be built for wasm32 target");
+
 use {
     futures_task::noop_waker_ref,
     goods::*,

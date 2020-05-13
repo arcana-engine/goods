@@ -1,14 +1,11 @@
-//!
-//! Before running this example run `python -m http.server` in this example's directory.
-//!
-#[cfg(target_arch = "wasm32")]
-core::compile_error!("This example cannot be built for wasm32 target");
-
-extern crate alloc;
+#[cfg(not(target_arch = "wasm32"))]
+core::compile_error!("This example can be built only for wasm32 target");
 
 use {
     goods::*,
-    std::{collections::HashMap, sync::Arc, time::Duration},
+    std::{collections::HashMap, rc::Rc},
+    wasm_bindgen::{prelude::*, JsCast},
+    wasm_bindgen_futures::spawn_local,
 };
 
 /// First we defined type to represent our assets.
@@ -68,18 +65,22 @@ impl<K> AssetDefaultFormat<K> for Object {
     type DefaultFormat = JsonFormat;
 }
 
-// Let's make it tokio based app
-#[tokio::main]
-async fn main() {
-    // Init loggger.
-    env_logger::init();
+#[wasm_bindgen]
+pub async fn run() {
+    // Init logging system.
+    console_log::init_with_level(log::Level::Trace).unwrap_throw();
+    log::trace!("Running");
 
-    // Create new registry.
+    // Build source registry.
+    // We'll use `String` as asset key.
+    // Key type must be compatible with all used sources.
     let registry = Registry::builder()
-        // With source which fetches assets by HTTP protocol
-        // treating asset key as `URL`
-        // asset key type is inferred as `&str` from `cache.load` below.
-        .with(goods::ReqwestSource::new())
+        // One of the simplest sources is `FileSource`.
+        // It reads asset data from files.
+        // To get file path it joins root path with asset key.
+        // asset key type must implement `AsRef<Path>`.
+        // `String` type does.
+        .with(FetchSource::new())
         .build();
 
     // Create new asset loader to drive async loading tasks.
@@ -88,44 +89,45 @@ async fn main() {
     // Create new asset cache with built registry and loader.
     // Cache will issue loading tasks into this loader.
     // Note that `loader` is borrowed only for `Cache::new` function execution.
-    let cache = Arc::new(Cache::new(registry, &loader));
+    let cache = Cache::new(registry, &loader);
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
     // We expect `FsSource` to find the sibling file with that name.
     // `Object`s default format is json, so we don't have to specify it here.
-    let object_json: Handle<Object> = cache.load("http://localhost:8000/asset.json");
-
-    // Spawn a task that will await for all loads to complete.
-    // `Loader::flush` will resolve one all pending loading tasks are complete.
-    // `Loader::run` will resolve only when all caches created from it are dropped and all tasks are complete.
-    tokio::spawn({
-        let cache = cache.clone();
-        async move {
-            loader.run(&cache).await;
-        }
-    });
+    let object_json: Handle<Object> = cache.load("asset.json".to_string());
 
     // Another asset will be "asset.yaml".
     // Again, sibling file with the name will be read by `FsSource` we added in the registry.
     // Alternative loading function accepts format for data decoding,
     // and here we specify `YamlFormat` to read YAML document from the file.
-    let object_yaml: Handle<Object> =
-        cache.load_with_format("http://localhost:8000/asset.yaml", YamlFormat);
+    let object_yaml: Handle<Object> = cache.load_with_format("asset.yaml".to_string(), YamlFormat);
 
-    // Spawn a task to complete assets loading.
-    tokio::spawn(async move {
-        loop {
-            // Process all `Asset` implementations that need no real context to finish.
-            // This is the case for `SimpleAsset` implementations.
-            cache.process(&mut PhantomContext);
+    let cache = Rc::new(cache);
 
-            // Make a 1ms delay between calls to the process function.
-            tokio::time::delay_for(Duration::from_millis(1)).await;
+    spawn_local({
+        let cache = cache.clone();
+        async move {
+            log::info!("Run loading tasks");
+            // Drive async loading tasks.
+            loader.run(&cache).await;
         }
     });
 
+    // Process all `SimpleAsset` implementations.
+    let closure = Closure::wrap(Box::new(move || cache.process_simple()) as Box<dyn Fn()>);
+    let window = web_sys::window().unwrap_throw();
+    window
+        .set_interval_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            100,
+        )
+        .unwrap_throw();
+    closure.forget();
+
+    log::info!("Wait for assets");
+
     // Await for handles treating them as `Future`.
-    println!("From json: {:#?}", object_json.await);
-    println!("From yaml: {:#?}", object_yaml.await);
+    log::info!("From json: {:#?}", object_json.await.unwrap_throw());
+    log::info!("From yaml: {:#?}", object_yaml.await.unwrap_throw());
 }

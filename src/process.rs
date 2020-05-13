@@ -1,16 +1,18 @@
 use {
-    super::{handle::Handle, Error},
     crate::{
         asset::Asset,
         channel::{channel, Receiver, Sender},
+        handle::Handle,
+        sync::{Ptr, Send},
+        Error,
     },
-    alloc::{boxed::Box, sync::Arc, vec::Vec},
+    alloc::{boxed::Box, vec::Vec},
     core::{any::Any, marker::PhantomData},
 };
 
 pub(crate) struct ProcessSlot<A: Asset> {
     handle: Handle<A>,
-    sender: Sender<Box<dyn AnyProcess<A::Context> + Send>>,
+    sender: Sender<Box<dyn AnyProcess<A::Context>>>,
 }
 
 impl<A> ProcessSlot<A>
@@ -25,7 +27,7 @@ where
     }
 }
 
-pub(crate) trait AnyProcess<C> {
+pub(crate) trait AnyProcess<C>: Send {
     fn run(self: Box<Self>, ctx: &mut C);
 }
 
@@ -43,15 +45,15 @@ where
     fn run(self: Box<Self>, ctx: &mut A::Context) {
         let result = self
             .result
-            .and_then(|asset| A::build(asset, ctx).map_err(|err| Error::Asset(Arc::new(err))));
+            .and_then(|asset| A::build(asset, ctx).map_err(|err| Error::Asset(Ptr::new(err))));
 
         self.handle.set(result);
     }
 }
 
 struct Processes<C> {
-    receiver: Receiver<Box<dyn AnyProcess<C> + Send>>,
-    sender: Sender<Box<dyn AnyProcess<C> + Send>>,
+    receiver: Receiver<Box<dyn AnyProcess<C>>>,
+    sender: Sender<Box<dyn AnyProcess<C>>>,
 }
 
 impl<C> Processes<C> {
@@ -60,12 +62,16 @@ impl<C> Processes<C> {
         Processes { sender, receiver }
     }
 
-    fn run(&mut self) -> Vec<Box<dyn AnyProcess<C> + Send>> {
+    fn run(&mut self) -> Vec<Box<dyn AnyProcess<C>>> {
         self.receiver.recv_batch()
     }
 }
 
 pub(crate) struct AnyProcesses<K> {
+    #[cfg(not(feature = "sync"))]
+    inner: Box<dyn Any>,
+
+    #[cfg(feature = "sync")]
     inner: Box<dyn Any + Send>,
     marker: PhantomData<fn(K)>,
 }
@@ -97,7 +103,7 @@ where
         (handle, slot)
     }
 
-    pub(crate) fn run<C: 'static>(&mut self) -> Vec<Box<dyn AnyProcess<C> + Send>> {
+    pub(crate) fn run<C: 'static>(&mut self) -> Vec<Box<dyn AnyProcess<C>>> {
         Any::downcast_mut::<Processes<C>>(&mut *self.inner)
             .unwrap()
             .run()

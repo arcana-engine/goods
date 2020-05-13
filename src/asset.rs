@@ -1,5 +1,8 @@
 use {
-    crate::Cache,
+    crate::{
+        sync::{Send, Sync},
+        Cache,
+    },
     alloc::vec::Vec,
     core::{
         future::Future,

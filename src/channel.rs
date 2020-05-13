@@ -1,15 +1,15 @@
 use {
-    alloc::{sync::Arc, vec::Vec},
+    crate::sync::{Lock, Ptr},
+    alloc::vec::Vec,
     core::{
         mem::swap,
         task::{Context, Poll, Waker},
     },
-    spin::Mutex,
 };
 
 /// Sender for spin-lock based channel.
 pub(crate) struct Sender<T> {
-    inner: Arc<Mutex<Inner<T>>>,
+    inner: Ptr<Lock<Inner<T>>>,
 }
 
 impl<T> Sender<T> {
@@ -32,7 +32,7 @@ impl<T> Clone for Sender<T> {
 
 pub(crate) struct Receiver<T> {
     received: Vec<T>,
-    inner: Arc<Mutex<Inner<T>>>,
+    inner: Ptr<Lock<Inner<T>>>,
 }
 
 struct Inner<T> {
@@ -64,7 +64,7 @@ impl<T> Receiver<T> {
     pub(crate) fn poll(&mut self, ctx: &mut Context<'_>) -> Poll<Option<T>> {
         if let Some(value) = self.received.pop() {
             Poll::Ready(Some(value))
-        } else if let Some(inner) = Arc::get_mut(&mut self.inner) {
+        } else if let Some(inner) = Ptr::get_mut(&mut self.inner) {
             let mut lock = inner.lock();
             if lock.array.is_empty() {
                 drop(lock);
@@ -88,7 +88,7 @@ impl<T> Receiver<T> {
 }
 
 pub(crate) fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    let inner = Arc::new(Mutex::new(Inner {
+    let inner = Ptr::new(Lock::new(Inner {
         array: Vec::new(),
         waker: None,
     }));

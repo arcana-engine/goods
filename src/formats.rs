@@ -4,7 +4,7 @@ use {
         asset::{Asset, LeafFormat},
         Loader, PhantomContext,
     },
-    alloc::{sync::Arc, vec::Vec},
+    alloc::vec::Vec,
 };
 
 #[cfg(feature = "serde")]

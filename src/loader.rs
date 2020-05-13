@@ -4,6 +4,7 @@ use {
         channel::{channel, Receiver, Sender},
         process::ProcessSlot,
         source::SourceError,
+        sync::{BoxFuture, Send},
         Cache, Error,
     },
     alloc::{boxed::Box, vec::Vec},
@@ -12,7 +13,7 @@ use {
         pin::Pin,
         task::{Context, Poll},
     },
-    futures_core::{future::BoxFuture, ready},
+    futures_core::ready,
     pin_utils::{unsafe_pinned, unsafe_unpinned},
 };
 

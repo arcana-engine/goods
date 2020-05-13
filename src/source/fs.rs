@@ -1,10 +1,9 @@
 use {
-    crate::source::{Source, SourceError},
-    futures_core::future::BoxFuture,
-    std::{
-        path::{Path, PathBuf},
-        sync::Arc,
+    crate::{
+        source::{Source, SourceError},
+        sync::{BoxFuture, Ptr},
     },
+    std::path::{Path, PathBuf},
 };
 
 /// Asset source that treats asset key as relative file path,
@@ -30,7 +29,7 @@ where
         let result = match std::fs::read(path) {
             Ok(bytes) => Ok(bytes),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(SourceError::NotFound),
-            Err(err) => Err(SourceError::Error(Arc::new(err))),
+            Err(err) => Err(SourceError::Error(Ptr::new(err))),
         };
 
         Box::pin(async move { result })

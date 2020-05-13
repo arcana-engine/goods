@@ -38,6 +38,7 @@ mod loader;
 mod process;
 mod registry;
 mod source;
+mod sync;
 
 #[cfg(feature = "legion")]
 mod legion;
@@ -45,16 +46,21 @@ mod legion;
 pub use self::{asset::*, formats::*, handle::*, loader::*, registry::*, registry::*, source::*};
 
 use {
-    crate::{channel::Sender, process::AnyProcesses},
-    alloc::{boxed::Box, sync::Arc},
+    crate::{channel::Sender, process::AnyProcesses, sync::Lock},
+    alloc::boxed::Box,
     core::{
         any::TypeId,
         fmt::{self, Debug, Display},
         hash::Hash,
     },
     hashbrown::hash_map::{Entry, HashMap},
-    spin::Mutex,
 };
+
+#[cfg(not(feature = "sync"))]
+use alloc::rc::Rc;
+
+#[cfg(feature = "sync")]
+use alloc::sync::Arc;
 
 /// Error occured in process of asset loading.
 pub enum Error<A: Asset> {
@@ -64,15 +70,30 @@ pub enum Error<A: Asset> {
     /// Asset instance decoding or building failed.
     ///
     /// Specifically this error may occur in `Asset::build` and `Format::decode`.
+    #[cfg(not(feature = "sync"))]
+    Asset(Rc<A::Error>),
+
+    /// Asset instance decoding or building failed.
+    ///
+    /// Specifically this error may occur in `Asset::build` and `Format::decode`.
+    #[cfg(feature = "sync")]
     Asset(Arc<A::Error>),
 
     /// Source in which asset was found failed to load it.
-    #[cfg(feature = "std")]
-    Source(Arc<dyn std::error::Error + Send + Sync>),
+    #[cfg(all(not(feature = "std"), not(feature = "sync")))]
+    Source(Rc<dyn Display>),
 
     /// Source in which asset was found failed to load it.
-    #[cfg(not(feature = "std"))]
-    Source(Arc<dyn core::fmt::Display + Send + Sync>),
+    #[cfg(all(not(feature = "std"), feature = "sync"))]
+    Source(Arc<dyn Display + Send + Sync>),
+
+    /// Source in which asset was found failed to load it.
+    #[cfg(all(feature = "std", not(feature = "sync")))]
+    Source(Rc<dyn std::error::Error>),
+
+    /// Source in which asset was found failed to load it.
+    #[cfg(all(feature = "std", feature = "sync"))]
+    Source(Arc<dyn std::error::Error + Send + Sync>),
 }
 
 impl<A> Clone for Error<A>
@@ -133,8 +154,8 @@ where
 /// Caches loaded assets and provokes loading work for new assets.
 pub struct Cache<K> {
     registry: Registry<K>,
-    cache: Mutex<HashMap<(TypeId, K), AnyHandle>>,
-    processes: Mutex<HashMap<TypeId, AnyProcesses<K>>>,
+    cache: Lock<HashMap<(TypeId, K), AnyHandle>>,
+    processes: Lock<HashMap<TypeId, AnyProcesses<K>>>,
     loader_sender: Sender<LoaderTask<K>>,
 }
 
@@ -145,8 +166,8 @@ impl<K> Cache<K> {
     pub fn new(registry: Registry<K>, loader: &Loader<K>) -> Self {
         Cache {
             registry,
-            cache: Mutex::default(),
-            processes: Mutex::default(),
+            cache: Lock::default(),
+            processes: Lock::default(),
             loader_sender: loader.sender(),
         }
     }
@@ -227,7 +248,7 @@ impl<K> Cache<K> {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "sync")]
 #[allow(dead_code)]
 fn test_loader_send_sync<K: Send>() {
     fn is_send<T: Send>() {}
