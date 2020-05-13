@@ -1,6 +1,6 @@
 [package]
 name = "goods"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["zakarumych"]
 edition = "2018"
 description = "Asset manager for good assets"
@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 documentation = "https://docs.rs/goods"
 keywords = ["assets", "no_std", "async", "wasm", "web"]
 repository = "https://github.com/zakarumych/goods"
+readme = "README.md"
 
 [features]
 std = []
