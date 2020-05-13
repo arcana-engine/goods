@@ -66,7 +66,7 @@ There are few simple examples provided already.
 
 [legion example](./examples/legion.rs) - shows how to load assets into entity using `legion` ECS crate.
 
-[fetch example](./examples/fetch) - shows how to load assets in browser using Fetch API.
+[fetch example](./examples/fetch.rs) - shows how to load assets in browser using Fetch API.
 
 ## License
 
