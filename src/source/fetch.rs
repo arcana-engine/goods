@@ -7,7 +7,7 @@ use {
         source::{Source, SourceError},
         sync::{BoxFuture, Ptr},
     },
-    alloc::{boxed::Box, vec::Vec},
+    alloc::{boxed::Box, string::String, vec::Vec},
     core::fmt::{self, Display},
     js_sys::{ArrayBuffer, Uint8Array},
     wasm_bindgen::JsValue,
