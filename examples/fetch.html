@@ -10,7 +10,7 @@
         import init from './generated/fetch.js';
         new Promise(function (resolve, reject) {
             window.addEventListener("load", () => {
-                init('./generated/fetch_bg.wasm').then((m) => resolve(m));
+                init('./generated/fetch.wasm').then((m) => resolve(m));
             })
         })
             .then(m => {

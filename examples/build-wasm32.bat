@@ -5,7 +5,8 @@ IF "%1"=="" (
 echo "Build WASM module"
 setlocal
 set RUSTFLAGS=-C linker=lld
-cargo build --all-features --release --target=wasm32-unknown-unknown --example %1
+
+cargo build --release --target=wasm32-unknown-unknown --no-default-features --example %*
 
 echo "Generate bindings"
 wasm-bindgen --target web --out-dir "%~dp0\generated" --no-typescript "%~dp0\..\..\target\wasm32-unknown-unknown\release\examples\%1.wasm"
