@@ -13,6 +13,7 @@ use serde::de::DeserializeOwned;
 /// Format that treats bytes as JSON document and deserializes asset representation with `serde`.
 #[cfg(feature = "json-format")]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(doc, doc(cfg(feature = "json-format")))]
 pub struct JsonFormat;
 
 #[cfg(feature = "json-format")]
@@ -30,6 +31,7 @@ where
 /// Format that treats bytes as YAML document and deserializes asset representation with `serde`.
 #[cfg(feature = "yaml-format")]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(doc, doc(cfg(feature = "yaml-format")))]
 pub struct YamlFormat;
 
 #[cfg(feature = "yaml-format")]
@@ -47,6 +49,7 @@ where
 /// Format that treats bytes as RON document and deserializes asset representation with `serde`.
 #[cfg(feature = "ron-format")]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(doc, doc(cfg(feature = "ron-format")))]
 pub struct RonFormat;
 
 #[cfg(feature = "ron-format")]

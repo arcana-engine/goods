@@ -20,7 +20,7 @@ json-format = ["serde", "serde_json"]
 yaml-format = ["serde", "serde_yaml"]
 ron-format = ["serde", "ron"]
 
-default = ["sync"]
+default = ["std", "sync"]
 
 [dependencies]
 futures-core = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -71,3 +71,18 @@ required-features = ["fs", "ron-format"]
 name = "fetch"
 required-features = ["fetch", "json-format", "yaml-format"]
 crate-type = ["cdylib"]
+
+[package.metadata.docs.rs]
+no-default-features = true
+features = ["std", "fs", "reqwest", "fetch", "json-format", "yaml-format", "ron-format"]
+
+targets = [
+    "i686-pc-windows-gnu",
+    "i686-pc-windows-msvc",
+    "i686-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "wasm32-unknown-unknown",
+]

@@ -8,6 +8,7 @@ use {
 
 /// Asset source that treats asset key as relative file path,
 /// joins it with root path and loads asset data from file.
+#[cfg_attr(doc, doc(cfg(feature = "fs")))]
 pub struct FileSource {
     root: PathBuf,
 }

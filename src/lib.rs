@@ -1,13 +1,16 @@
+//! # Goods
 //!
-//! # Goods - asset manager
-//! Loads only good assets.
+//! Easy-to-use asset manager for many environments.
 //!
 //! ## Goals
+//!
+//! This crate is written with following goals in mind:
+//!
 //! * **Batteries included.**\
 //!   Crate comes with variety of simple data sources like `FileSource` and `HttpSource`.
 //!   Few `Format`s based on serde are included under feature flags.
 //!
-//! * **Extensible.**\
+//! * **Extensibility.**\
 //!   Multiple `Format` traits can be implemented for any asset type, including foreign asset types.\
 //!   For example `JsonFormat`, `YamlFormat` and `RonFormat` (bundled in the crate) implement `Format` trait for any asset type
 //!   which intermediate representation implements `serde::de::DeserializeOwned`.
@@ -25,8 +28,16 @@
 //! * **Fast compilation.**\
 //!     build after `cargo clean` takes ~3s.
 //!
+//! ## Non-Goals
+//!
+//! This crate is not aimed to support every possible feature.
+//! Here's list of some of those features:
+//!
+//! * Hot-reloading\
+//!   Currently there are no plans to support hot-reloading.
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(doc, feature(doc_cfg))]
 
 extern crate alloc;
 

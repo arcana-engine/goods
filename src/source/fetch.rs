@@ -16,6 +16,7 @@ use {
 };
 
 #[cfg(not(feature = "sync"))]
+#[cfg_attr(doc, doc(cfg(feature = "fetch")))]
 pub struct FetchSource;
 
 #[cfg(not(feature = "sync"))]
