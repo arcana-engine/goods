@@ -89,7 +89,8 @@ async fn main() {
     // First asset will be "asset.json".
     // We expect `FsSource` to find the sibling file with that name.
     // `Object`s default format is json, so we don't have to specify it here.
-    let object_json: Handle<Object> = cache.load("http://localhost:8000/asset.json");
+    let object_json: Handle<Object> =
+        cache.load("https://raw.githubusercontent.com/zakarumych/goods/master/examples/asset.json");
 
     // Spawn a task that will await for all loads to complete.
     // This task will resolve only after `cache` is destroyed (all clones) which esnures that there will be no new tasks.
@@ -99,8 +100,10 @@ async fn main() {
     // Again, sibling file with the name will be read by `FsSource` we added in the registry.
     // Alternative loading function accepts format for data decoding,
     // and here we specify `YamlFormat` to read YAML document from the file.
-    let object_yaml: Handle<Object> =
-        cache.load_with_format("http://localhost:8000/asset.yaml", YamlFormat);
+    let object_yaml: Handle<Object> = cache.load_with_format(
+        "https://raw.githubusercontent.com/zakarumych/goods/master/examples/asset.yaml",
+        YamlFormat,
+    );
 
     // Spawn a task to complete assets loading.
     tokio::spawn(async move {

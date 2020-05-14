@@ -22,6 +22,10 @@ ron-format = ["serde", "ron"]
 
 default = ["std", "sync"]
 
+reqwest-default-tls = ["reqwest/default-tls"]
+reqwest-native-tls = ["reqwest/native-tls"]
+reqwest-rustls-tls = ["reqwest/rustls-tls"]
+
 [dependencies]
 futures-core = { version = "0.3", default-features = false, features = ["alloc"] }
 log = { version = "0.4", default-features = false, features = ["max_level_trace", "release_max_level_trace"] }

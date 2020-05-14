@@ -35,7 +35,7 @@ where
 
         Box::pin(async move {
             let response = request.await.map_err(|err| {
-                log::trace!("Error fetchin asset {}", err);
+                log::debug!("Error fetchin asset: {}", err);
                 SourceError::NotFound
             })?;
             let status = response.status();
@@ -51,7 +51,7 @@ where
                     Err(SourceError::NotFound)
                 }
                 _ => {
-                    log::warn!("Unexpected status {}", status);
+                    log::warn!("Unexpected status: {}", status);
                     Err(SourceError::NotFound)
                 }
             }
