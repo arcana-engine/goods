@@ -3,7 +3,7 @@ core::compile_error!("This example can be built only for wasm32 target");
 
 use {
     goods::*,
-    std::{collections::HashMap, rc::Rc},
+    std::collections::HashMap,
     wasm_bindgen::{prelude::*, JsCast},
     wasm_bindgen_futures::spawn_local,
 };
@@ -83,13 +83,8 @@ pub async fn run() {
         .with(FetchSource::new())
         .build();
 
-    // Create new asset loader to drive async loading tasks.
-    let mut loader = Loader::new();
-
-    // Create new asset cache with built registry and loader.
-    // Cache will issue loading tasks into this loader.
-    // Note that `loader` is borrowed only for `Cache::new` function execution.
-    let cache = Cache::new(registry, &loader);
+    // Create new asset cache with built registry.
+    let cache = Cache::new(registry);
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
@@ -103,16 +98,9 @@ pub async fn run() {
     // and here we specify `YamlFormat` to read YAML document from the file.
     let object_yaml: Handle<Object> = cache.load_with_format("asset.yaml".to_string(), YamlFormat);
 
-    let cache = Rc::new(cache);
-
-    spawn_local({
-        let cache = cache.clone();
-        async move {
-            log::info!("Run loading tasks");
-            // Drive async loading tasks.
-            loader.run(&cache).await;
-        }
-    });
+    // Spawn a task that will await for all loads to complete.
+    // This task will resolve only after `cache` is destroyed (all clones) which esnures that there will be no new tasks.
+    spawn_local(cache.loader());
 
     // Process all `SimpleAsset` implementations.
     let closure = Closure::wrap(Box::new(move || cache.process_simple()) as Box<dyn Fn()>);

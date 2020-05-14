@@ -42,11 +42,11 @@
 extern crate alloc;
 
 mod asset;
-mod channel;
 mod formats;
 mod handle;
 mod loader;
 mod process;
+mod queue;
 mod registry;
 mod source;
 mod sync;
@@ -58,8 +58,8 @@ pub use self::{asset::*, formats::*, handle::*, loader::*, registry::*, registry
 
 use {
     crate::{
-        channel::{Sender, WeakSender},
         process::AnyProcesses,
+        queue::Queue,
         sync::{Lock, Ptr, WeakPtr},
     },
     alloc::boxed::Box,
@@ -169,13 +169,13 @@ where
 /// Caches loaded assets and provokes loading work for new assets.
 pub struct Cache<K> {
     registry: Registry<K>,
-    inner: Ptr<Inner<K>>,
-    loader_sender: Sender<LoaderTask<K>>,
+    pub(crate) inner: Ptr<Inner<K>>,
 }
 
 struct Inner<K> {
     cache: Lock<HashMap<(TypeId, K), AnyHandle>>,
     processes: Lock<HashMap<TypeId, AnyProcesses<K>>>,
+    pub(crate) loader: Queue<LoaderTask<K>>,
 }
 
 impl<K> Clone for Cache<K> {
@@ -183,7 +183,6 @@ impl<K> Clone for Cache<K> {
         Cache {
             registry: self.registry.clone(),
             inner: self.inner.clone(),
-            loader_sender: self.loader_sender.clone(),
         }
     }
 }
@@ -192,13 +191,13 @@ impl<K> Cache<K> {
     /// Creates new asset cache.
     /// Assets will be loaded from provided `registry`.
     /// Loading tasks will be sent to `Loader`.
-    pub fn new(registry: Registry<K>, loader: &Loader<K>) -> Self {
+    pub fn new(registry: Registry<K>) -> Self {
         Cache {
             registry,
-            loader_sender: loader.sender(),
             inner: Ptr::new(Inner {
                 cache: Lock::default(),
                 processes: Lock::default(),
+                loader: Queue::new(),
             }),
         }
     }
@@ -245,7 +244,7 @@ impl<K> Cache<K> {
                 entry.insert(handle.clone().into());
                 drop(lock);
 
-                self.loader_sender.send(LoaderTask::new(
+                self.inner.loader.push(LoaderTask::new(
                     Box::pin(self.registry.clone().read(key)),
                     format,
                     slot,
@@ -271,7 +270,7 @@ impl<K> Cache<K> {
         }
     }
 
-    /// Process all `SimpleAsset` types.
+    /// Process all `SimpleAsset`s.
     pub fn process_simple(&self)
     where
         K: 'static,
@@ -279,11 +278,18 @@ impl<K> Cache<K> {
         self.process(&mut PhantomContext);
     }
 
+    /// Create loader for this `Cache`.
+    /// `Loader` will drive async loading tasks to completion
+    /// and resolves only after `Cache` is destroyed (all clones are dropped).
+    /// To await only pending tasks use `Loader::flush` method.
+    pub fn loader(&self) -> Loader<K> {
+        Loader::new(self)
+    }
+
     fn downgrade(&self) -> WeakCache<K> {
         WeakCache {
             registry: self.registry.clone(),
             inner: Ptr::downgrade(&self.inner),
-            loader_sender: Sender::downgrade(&self.loader_sender),
         }
     }
 }
@@ -291,7 +297,6 @@ impl<K> Cache<K> {
 struct WeakCache<K> {
     registry: Registry<K>,
     inner: WeakPtr<Inner<K>>,
-    loader_sender: WeakSender<LoaderTask<K>>,
 }
 
 impl<K> Clone for WeakCache<K> {
@@ -299,7 +304,6 @@ impl<K> Clone for WeakCache<K> {
         WeakCache {
             registry: self.registry.clone(),
             inner: self.inner.clone(),
-            loader_sender: self.loader_sender.clone(),
         }
     }
 }
@@ -307,12 +311,10 @@ impl<K> Clone for WeakCache<K> {
 impl<K> WeakCache<K> {
     fn upgrade(&self) -> Option<Cache<K>> {
         let inner = self.inner.upgrade()?;
-        let loader_sender = self.loader_sender.upgrade()?;
 
         Cache {
             registry: self.registry.clone(),
             inner,
-            loader_sender,
         }
         .into()
     }

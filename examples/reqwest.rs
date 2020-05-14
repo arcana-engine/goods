@@ -8,7 +8,7 @@ extern crate alloc;
 
 use {
     goods::*,
-    std::{collections::HashMap, sync::Arc, time::Duration},
+    std::{collections::HashMap, time::Duration},
 };
 
 /// First we defined type to represent our assets.
@@ -82,13 +82,8 @@ async fn main() {
         .with(goods::ReqwestSource::new())
         .build();
 
-    // Create new asset loader to drive async loading tasks.
-    let mut loader = Loader::new();
-
-    // Create new asset cache with built registry and loader.
-    // Cache will issue loading tasks into this loader.
-    // Note that `loader` is borrowed only for `Cache::new` function execution.
-    let cache = Arc::new(Cache::new(registry, &loader));
+    // Create new asset cache with built registry.
+    let cache = Cache::new(registry);
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
@@ -97,14 +92,8 @@ async fn main() {
     let object_json: Handle<Object> = cache.load("http://localhost:8000/asset.json");
 
     // Spawn a task that will await for all loads to complete.
-    // `Loader::flush` will resolve one all pending loading tasks are complete.
-    // `Loader::run` will resolve only when all caches created from it are dropped and all tasks are complete.
-    tokio::spawn({
-        let cache = cache.clone();
-        async move {
-            loader.run(&cache).await;
-        }
-    });
+    // This task will resolve only after `cache` is destroyed (all clones) which esnures that there will be no new tasks.
+    tokio::spawn(cache.loader());
 
     // Another asset will be "asset.yaml".
     // Again, sibling file with the name will be read by `FsSource` we added in the registry.

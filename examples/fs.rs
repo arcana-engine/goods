@@ -83,13 +83,8 @@ fn main() {
         ))
         .build();
 
-    // Create new asset loader to drive async loading tasks.
-    let mut loader = Loader::new();
-
-    // Create new asset cache with built registry and loader.
-    // Cache will issue loading tasks into this loader.
-    // Note that `loader` is borrowed only for `Cache::new` function execution.
-    let cache = Cache::new(registry, &loader);
+    // Create new asset cache with built registry.
+    let cache = Cache::new(registry);
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
@@ -110,7 +105,7 @@ fn main() {
     // `FsSource` is not trully asynchronous as it uses `std::fs::File` API which is sync.
     // `FsSource::read` returns future that will be resolved on first `poll`.
     // So we expect loading to be finished after single call.
-    let _ = loader.poll(&mut ctx, &cache);
+    let _ = cache.loader().poll(&mut ctx);
 
     // Process raw assets into their final form.
     // This variant of the function doesn't accept no context

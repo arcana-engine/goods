@@ -1,8 +1,8 @@
 use {
     crate::{
         asset::Asset,
-        channel::{channel, Receiver, Sender},
         handle::Handle,
+        queue::Queue,
         sync::{Ptr, Send},
         Error,
     },
@@ -12,7 +12,7 @@ use {
 
 pub(crate) struct ProcessSlot<A: Asset> {
     handle: Handle<A>,
-    sender: Sender<Box<dyn AnyProcess<A::Context>>>,
+    queue: Ptr<Queue<Box<dyn AnyProcess<A::Context>>>>,
 }
 
 impl<A> ProcessSlot<A>
@@ -20,7 +20,7 @@ where
     A: Asset,
 {
     pub(crate) fn set(self, result: Result<A::Repr, Error<A>>) {
-        self.sender.send(Box::new(Process {
+        self.queue.push(Box::new(Process {
             result,
             handle: self.handle,
         }))
@@ -52,19 +52,19 @@ where
 }
 
 struct Processes<C> {
-    receiver: Receiver<Box<dyn AnyProcess<C>>>,
-    sender: Sender<Box<dyn AnyProcess<C>>>,
+    queue: Ptr<Queue<Box<dyn AnyProcess<C>>>>,
 }
 
 impl<C> Processes<C> {
     fn new() -> Self {
-        let (sender, receiver) = channel();
-        Processes { sender, receiver }
+        Processes {
+            queue: Ptr::new(Queue::new()),
+        }
     }
 
     fn run(&mut self) -> Vec<Box<dyn AnyProcess<C>>> {
         let mut received = Vec::new();
-        self.receiver.recv(&mut received);
+        self.queue.take(&mut received);
         received
     }
 }
@@ -93,14 +93,14 @@ where
     where
         A: Asset,
     {
-        let sender = Any::downcast_ref::<Processes<A::Context>>(&*self.inner)
+        let queue = Any::downcast_ref::<Processes<A::Context>>(&*self.inner)
             .unwrap()
-            .sender
+            .queue
             .clone();
         let handle = Handle::new();
         let slot = ProcessSlot {
             handle: handle.clone(),
-            sender,
+            queue,
         };
         (handle, slot)
     }
