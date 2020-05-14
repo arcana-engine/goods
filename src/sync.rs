@@ -29,6 +29,12 @@ pub(crate) type Ptr<T> = alloc::rc::Rc<T>;
 #[cfg(feature = "sync")]
 pub(crate) type Ptr<T> = alloc::sync::Arc<T>;
 
+#[cfg(not(feature = "sync"))]
+pub(crate) type WeakPtr<T> = alloc::rc::Weak<T>;
+
+#[cfg(feature = "sync")]
+pub(crate) type WeakPtr<T> = alloc::sync::Weak<T>;
+
 #[cfg(feature = "sync")]
 pub(crate) type Lock<T> = spin::Mutex<T>;
 

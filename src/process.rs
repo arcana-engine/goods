@@ -63,7 +63,9 @@ impl<C> Processes<C> {
     }
 
     fn run(&mut self) -> Vec<Box<dyn AnyProcess<C>>> {
-        self.receiver.recv_batch()
+        let mut received = Vec::new();
+        self.receiver.recv(&mut received);
+        received
     }
 }
 

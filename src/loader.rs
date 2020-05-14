@@ -5,7 +5,7 @@ use {
         process::ProcessSlot,
         source::SourceError,
         sync::{BoxFuture, Send},
-        Cache, Error,
+        Cache, Error, WeakCache,
     },
     alloc::{boxed::Box, vec::Vec},
     core::{
@@ -118,6 +118,7 @@ impl<K> LoaderTask<K> {
 /// Loader receives loading tasks from asset cache and drives them in the async context.
 pub struct Loader<K> {
     tasks: Vec<LoaderTask<K>>,
+    scratch: Vec<LoaderTask<K>>,
     receiver: Receiver<LoaderTask<K>>,
     sender: Sender<LoaderTask<K>>,
 }
@@ -128,6 +129,7 @@ impl<K> Loader<K> {
 
         Loader {
             tasks: Vec::new(),
+            scratch: Vec::new(),
             receiver,
             sender,
         }
@@ -135,24 +137,42 @@ impl<K> Loader<K> {
 
     /// Drives loading jobs.
     pub fn poll(&mut self, ctx: &mut Context<'_>, cache: &Cache<K>) -> Poll<()> {
-        // Poll tasks.
-        let mut i = 0;
-        while i < self.tasks.len() {
-            if let Poll::Ready(()) = self.tasks[i].poll(ctx, cache) {
-                self.tasks.swap_remove(i);
-            } else {
-                i += 1;
+        // Receive new tasks.
+        match self.receiver.poll(ctx, &mut self.scratch) {
+            Poll::Pending => {
+                // Poll pending tasks.
+                let mut i = 0;
+                while i < self.tasks.len() {
+                    if let Poll::Ready(()) = self.tasks[i].poll(ctx, cache) {
+                        self.tasks.swap_remove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+                Poll::Pending
             }
-        }
+            Poll::Ready(finished) => {
+                // Poll pending tasks first.
+                let mut i = 0;
+                while i < self.tasks.len() {
+                    if let Poll::Ready(()) = self.tasks[i].poll(ctx, cache) {
+                        self.tasks.swap_remove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
 
-        loop {
-            match self.receiver.poll(ctx) {
-                Poll::Ready(None) => return Poll::Ready(()),
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Some(mut task)) => {
+                // Poll new tasks and push pending to the pending tasks list.
+                for mut task in self.scratch.drain(..) {
                     if let Poll::Pending = task.poll(ctx, cache) {
                         self.tasks.push(task);
                     }
+                }
+
+                if finished && self.tasks.is_empty() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
                 }
             }
         }
@@ -167,10 +187,10 @@ impl<K> Loader<K> {
     }
 
     /// Drives all loading jobs including new jobs to completion.
-    pub fn run<'a>(&'a mut self, cache: &'a Cache<K>) -> LoaderRun<'a, K> {
+    pub fn run<'a>(&'a mut self, cache: &Cache<K>) -> LoaderRun<'a, K> {
         LoaderRun {
             loader: self,
-            cache,
+            cache: Cache::downgrade(cache),
         }
     }
 
@@ -212,7 +232,7 @@ impl<'a, K> Future for LoaderFlush<'a, K> {
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct LoaderRun<'a, K> {
     loader: &'a mut Loader<K>,
-    cache: &'a Cache<K>,
+    cache: WeakCache<K>,
 }
 
 impl<'a, K> Unpin for LoaderRun<'a, K> {}
@@ -222,6 +242,55 @@ impl<'a, K> Future for LoaderRun<'a, K> {
 
     fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<()> {
         let LoaderRun { loader, cache } = self.get_mut();
-        loader.poll(ctx, cache)
+
+        // Receive new tasks.
+        match loader.receiver.poll(ctx, &mut loader.scratch) {
+            Poll::Pending => {
+                let cache = match cache.upgrade() {
+                    Some(cache) => cache,
+                    None => return Poll::Ready(()), // Cannot continue without cache instance.
+                };
+
+                // Poll pending tasks.
+                let mut i = 0;
+                while i < loader.tasks.len() {
+                    if let Poll::Ready(()) = loader.tasks[i].poll(ctx, &cache) {
+                        loader.tasks.swap_remove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+                Poll::Pending
+            }
+            Poll::Ready(finished) => {
+                let cache = match cache.upgrade() {
+                    Some(cache) => cache,
+                    None => return Poll::Ready(()), // Cannot continue without cache instance.
+                };
+
+                // Poll pending tasks first.
+                let mut i = 0;
+                while i < loader.tasks.len() {
+                    if let Poll::Ready(()) = loader.tasks[i].poll(ctx, &cache) {
+                        loader.tasks.swap_remove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+
+                // Poll new tasks and push pending to the pending tasks list.
+                for mut task in loader.scratch.drain(..) {
+                    if let Poll::Pending = task.poll(ctx, &cache) {
+                        loader.tasks.push(task);
+                    }
+                }
+
+                if finished && loader.tasks.is_empty() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }
+        }
     }
 }

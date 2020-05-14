@@ -57,7 +57,11 @@ mod legion;
 pub use self::{asset::*, formats::*, handle::*, loader::*, registry::*, registry::*, source::*};
 
 use {
-    crate::{channel::Sender, process::AnyProcesses, sync::Lock},
+    crate::{
+        channel::{Sender, WeakSender},
+        process::AnyProcesses,
+        sync::{Lock, Ptr, WeakPtr},
+    },
     alloc::boxed::Box,
     core::{
         any::TypeId,
@@ -165,9 +169,23 @@ where
 /// Caches loaded assets and provokes loading work for new assets.
 pub struct Cache<K> {
     registry: Registry<K>,
+    inner: Ptr<Inner<K>>,
+    loader_sender: Sender<LoaderTask<K>>,
+}
+
+struct Inner<K> {
     cache: Lock<HashMap<(TypeId, K), AnyHandle>>,
     processes: Lock<HashMap<TypeId, AnyProcesses<K>>>,
-    loader_sender: Sender<LoaderTask<K>>,
+}
+
+impl<K> Clone for Cache<K> {
+    fn clone(&self) -> Self {
+        Cache {
+            registry: self.registry.clone(),
+            inner: self.inner.clone(),
+            loader_sender: self.loader_sender.clone(),
+        }
+    }
 }
 
 impl<K> Cache<K> {
@@ -177,9 +195,11 @@ impl<K> Cache<K> {
     pub fn new(registry: Registry<K>, loader: &Loader<K>) -> Self {
         Cache {
             registry,
-            cache: Lock::default(),
-            processes: Lock::default(),
             loader_sender: loader.sender(),
+            inner: Ptr::new(Inner {
+                cache: Lock::default(),
+                processes: Lock::default(),
+            }),
         }
     }
 
@@ -205,7 +225,7 @@ impl<K> Cache<K> {
     {
         let tid = TypeId::of::<A>();
 
-        let mut lock = self.cache.lock();
+        let mut lock = self.inner.cache.lock();
 
         match lock.entry((tid, key.clone())) {
             Entry::Occupied(entry) => {
@@ -215,6 +235,7 @@ impl<K> Cache<K> {
             }
             Entry::Vacant(entry) => {
                 let (handle, slot) = self
+                    .inner
                     .processes
                     .lock()
                     .entry(TypeId::of::<A::Context>())
@@ -240,7 +261,7 @@ impl<K> Cache<K> {
     where
         K: 'static,
     {
-        let mut lock = self.processes.lock();
+        let mut lock = self.inner.processes.lock();
         if let Some(processes) = lock.get_mut(&TypeId::of::<C>()) {
             let processes = processes.run();
             drop(lock);
@@ -256,6 +277,44 @@ impl<K> Cache<K> {
         K: 'static,
     {
         self.process(&mut PhantomContext);
+    }
+
+    fn downgrade(&self) -> WeakCache<K> {
+        WeakCache {
+            registry: self.registry.clone(),
+            inner: Ptr::downgrade(&self.inner),
+            loader_sender: Sender::downgrade(&self.loader_sender),
+        }
+    }
+}
+
+struct WeakCache<K> {
+    registry: Registry<K>,
+    inner: WeakPtr<Inner<K>>,
+    loader_sender: WeakSender<LoaderTask<K>>,
+}
+
+impl<K> Clone for WeakCache<K> {
+    fn clone(&self) -> Self {
+        WeakCache {
+            registry: self.registry.clone(),
+            inner: self.inner.clone(),
+            loader_sender: self.loader_sender.clone(),
+        }
+    }
+}
+
+impl<K> WeakCache<K> {
+    fn upgrade(&self) -> Option<Cache<K>> {
+        let inner = self.inner.upgrade()?;
+        let loader_sender = self.loader_sender.upgrade()?;
+
+        Cache {
+            registry: self.registry.clone(),
+            inner,
+            loader_sender,
+        }
+        .into()
     }
 }
 

@@ -1,5 +1,5 @@
 use {
-    crate::sync::{Lock, Ptr},
+    crate::sync::{Lock, Ptr, WeakPtr},
     alloc::vec::Vec,
     core::{
         mem::swap,
@@ -20,6 +20,12 @@ impl<T> Sender<T> {
             waker.wake();
         }
     }
+
+    pub(crate) fn downgrade(&self) -> WeakSender<T> {
+        WeakSender {
+            inner: Ptr::downgrade(&self.inner),
+        }
+    }
 }
 
 impl<T> Clone for Sender<T> {
@@ -30,8 +36,29 @@ impl<T> Clone for Sender<T> {
     }
 }
 
+/// Sender for spin-lock based channel.
+pub(crate) struct WeakSender<T> {
+    inner: WeakPtr<Lock<Inner<T>>>,
+}
+
+impl<T> WeakSender<T> {
+    pub(crate) fn upgrade(&self) -> Option<Sender<T>> {
+        Sender {
+            inner: self.inner.upgrade()?,
+        }
+        .into()
+    }
+}
+
+impl<T> Clone for WeakSender<T> {
+    fn clone(&self) -> Self {
+        WeakSender {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
 pub(crate) struct Receiver<T> {
-    received: Vec<T>,
     inner: Ptr<Lock<Inner<T>>>,
 }
 
@@ -41,48 +68,26 @@ struct Inner<T> {
 }
 
 impl<T> Receiver<T> {
-    // pub(crate) fn recv(&mut self) -> Option<T> {
-    //     if let Some(value) = self.received.pop() {
-    //         Some(value)
-    //     } else {
-    //         let mut lock = self.inner.lock();
-    //         swap(&mut lock.array, &mut self.received);
-    //         drop(lock);
-    //         self.received.pop()
-    //     }
-    // }
-
-    pub(crate) fn recv_batch(&mut self) -> Vec<T> {
-        let mut scratch = Vec::new();
-        let mut lock = self.inner.lock();
-        swap(&mut lock.array, &mut scratch);
-        drop(lock);
-        scratch.append(&mut self.received);
-        scratch
+    pub(crate) fn recv(&self, scratch: &mut Vec<T>) {
+        debug_assert!(scratch.is_empty());
+        swap(&mut self.inner.lock().array, scratch);
     }
 
-    pub(crate) fn poll(&mut self, ctx: &mut Context<'_>) -> Poll<Option<T>> {
-        if let Some(value) = self.received.pop() {
-            Poll::Ready(Some(value))
-        } else if let Some(inner) = Ptr::get_mut(&mut self.inner) {
-            let mut lock = inner.lock();
-            if lock.array.is_empty() {
-                drop(lock);
-                Poll::Ready(None)
+    pub(crate) fn poll(&mut self, ctx: &mut Context<'_>, scratch: &mut Vec<T>) -> Poll<bool> {
+        debug_assert!(scratch.is_empty());
+        let strong_count = Ptr::strong_count(&self.inner);
+        let mut lock = self.inner.lock();
+        if lock.array.is_empty() {
+            if strong_count == 1 {
+                Poll::Ready(false)
             } else {
-                swap(&mut lock.array, &mut self.received);
-                Poll::Ready(self.received.pop())
-            }
-        } else {
-            let mut lock = self.inner.lock();
-            if lock.array.is_empty() {
                 lock.waker = Some(ctx.waker().clone());
                 drop(lock);
                 Poll::Pending
-            } else {
-                swap(&mut lock.array, &mut self.received);
-                Poll::Ready(self.received.pop())
             }
+        } else {
+            swap(&mut lock.array, scratch);
+            Poll::Ready(true)
         }
     }
 }
@@ -93,7 +98,6 @@ pub(crate) fn channel<T>() -> (Sender<T>, Receiver<T>) {
         waker: None,
     }));
     let receiver = Receiver {
-        received: Vec::new(),
         inner: inner.clone(),
     };
     let sender = Sender { inner };
