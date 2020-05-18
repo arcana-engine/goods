@@ -2,9 +2,10 @@
 
 Easy-to-use asset manager for many environments.
 
-![crates](https://img.shields.io/crates/v/goods.svg?label=goods)
-![docs](https://docs.rs/goods/badge.svg)
-![License](https://img.shields.io/badge/license-MIT/APACHE-blue.svg)
+[![crates](https://img.shields.io/crates/v/goods.svg?label=goods)](https://crates.io/crates/goods)
+[![docs](https://docs.rs/goods/badge.svg)](https://docs.rs/goods)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
+[![License](https://img.shields.io/badge/license-APACHE-blue.svg)](LICENSE-APACHE)
 
 ## Goals
 
