@@ -1,12 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 core::compile_error!("This example can be built only for wasm32 target");
 
-use {
-    goods::*,
-    std::collections::HashMap,
-    wasm_bindgen::{prelude::*, JsCast},
-    wasm_bindgen_futures::spawn_local,
-};
+use {goods::*, std::collections::HashMap, wasm_bindgen::prelude::*};
 
 /// First we defined type to represent our assets.
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
@@ -84,7 +79,7 @@ pub async fn run() {
         .build();
 
     // Create new asset cache with built registry.
-    let cache = Cache::new(registry);
+    let cache = Cache::new(registry, WasmBindgen);
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
@@ -98,24 +93,26 @@ pub async fn run() {
     // and here we specify `YamlFormat` to read YAML document from the file.
     let object_yaml: Handle<Object> = cache.load_with_format("asset.yaml".to_string(), YamlFormat);
 
-    // Spawn a task that will await for all loads to complete.
-    // This task will resolve only after `cache` is destroyed (all clones) which esnures that there will be no new tasks.
-    spawn_local(cache.loader());
-
-    // Process all `SimpleAsset` implementations.
-    let closure = Closure::wrap(Box::new(move || cache.process_simple()) as Box<dyn Fn()>);
-    let window = web_sys::window().unwrap_throw();
-    window
-        .set_interval_with_callback_and_timeout_and_arguments_0(
-            closure.as_ref().unchecked_ref(),
-            100,
-        )
-        .unwrap_throw();
-    closure.forget();
-
-    log::info!("Wait for assets");
-
     // Await for handles treating them as `Future`.
-    log::info!("From json: {:#?}", object_json.await.unwrap_throw());
-    log::info!("From yaml: {:#?}", object_yaml.await.unwrap_throw());
+    log::info!("From json: {:#?}", object_json.clone().await.unwrap_throw());
+    log::info!("From yaml: {:#?}", object_yaml.clone().await.unwrap_throw());
+
+    let document = web_sys::window().unwrap_throw().document().unwrap_throw();
+
+    let div_json = document.create_element("div").unwrap_throw();
+    div_json.set_inner_html(&format!("{:#?}", object_json.get().unwrap_throw()));
+    document
+        .body()
+        .unwrap_throw()
+        .append_child(&div_json)
+        .unwrap_throw();
+
+    let div_yaml = document.create_element("div").unwrap_throw();
+
+    div_yaml.set_inner_html(&format!("{:#?}", object_yaml.get().unwrap_throw()));
+    document
+        .body()
+        .unwrap_throw()
+        .append_child(&div_yaml)
+        .unwrap_throw();
 }

@@ -4,6 +4,7 @@ use {
         sync::Ptr,
     },
     alloc::{boxed::Box, vec::Vec},
+    core::fmt::{self, Debug},
 };
 
 /// Builder for source registry.
@@ -79,5 +80,13 @@ where
             }
         }
         Err(SourceError::NotFound)
+    }
+}
+
+impl<K> Debug for Registry<K> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("Registry")
+            .field("storages", &self.storages)
+            .finish()
     }
 }

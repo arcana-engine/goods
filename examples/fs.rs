@@ -2,9 +2,8 @@
 core::compile_error!("This example cannot be built for wasm32 target");
 
 use {
-    futures_task::noop_waker_ref,
     goods::*,
-    std::{collections::HashMap, path::Path, task::Context},
+    std::{collections::HashMap, path::Path},
 };
 
 /// First we defined type to represent our assets.
@@ -84,7 +83,8 @@ fn main() {
         .build();
 
     // Create new asset cache with built registry.
-    let cache = Cache::new(registry);
+    // Loading tasks will be spawned to `ThreadPool`.
+    let cache = Cache::new(registry, futures_executor::ThreadPool::new().unwrap());
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
@@ -98,22 +98,9 @@ fn main() {
     // and here we specify `YamlFormat` to read YAML document from the file.
     let object_yaml: Handle<Object> = cache.load_with_format("asset.yaml".to_string(), YamlFormat);
 
-    // Dummy async context.
-    let mut ctx = Context::from_waker(noop_waker_ref());
-
-    // Drive async loading tasks.
-    // `FsSource` is not trully asynchronous as it uses `std::fs::File` API which is sync.
-    // `FsSource::read` returns future that will be resolved on first `poll`.
-    // So we expect loading to be finished after single call.
-    let _ = cache.loader().poll(&mut ctx);
-
-    // Process raw assets into their final form.
-    // This variant of the function doesn't accept no context
-    // and will affect only `SimpleAsset` implementations.
-    //
-    // more precisely, `Asset` implementations with `Context = PhantomContext`
-    // which is the case for `SimpleAsset` implementations.
-    cache.process_simple();
+    while object_json.is_pending() || object_yaml.is_pending() {
+        std::thread::yield_now();
+    }
 
     log::info!("From json: {:#?}", object_json.get().unwrap());
     log::info!("From yaml: {:#?}", object_yaml.get().unwrap());

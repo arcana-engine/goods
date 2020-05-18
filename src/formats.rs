@@ -2,7 +2,7 @@
 use {
     crate::{
         asset::{Asset, LeafFormat},
-        Loader, PhantomContext,
+        PhantomContext,
     },
     alloc::vec::Vec,
 };

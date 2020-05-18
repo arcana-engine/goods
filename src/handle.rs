@@ -68,7 +68,9 @@ where
     A: Asset,
 {
     fn drop(&mut self) {
-        if *self.set.get_mut() {}
+        if *self.set.get_mut() {
+            unsafe { ptr::drop_in_place({ &mut *self.storage.get() }.as_mut_ptr()) }
+        }
     }
 }
 
@@ -118,15 +120,6 @@ where
         }
     }
 
-    pub(crate) fn set(&self, result: Result<A, Error<A>>) {
-        assert!(false == self.state.set.load(Ordering::SeqCst));
-        unsafe {
-            ptr::write((&mut *self.state.storage.get()).as_mut_ptr(), result);
-        }
-        self.state.set.store(true, Ordering::Release);
-        self.state.wakers.lock().drain(..).for_each(Waker::wake);
-    }
-
     /// Queries for the asset state.
     /// Returns `Poll::Ready(Ok(asset))` if asset was successfully loaded.
     /// Returns `Poll::Ready(Err(error))` if error occured.
@@ -139,12 +132,31 @@ where
         }
     }
 
+    /// Checks if asset referenced by this handle is not loaded yet.
+    pub fn is_pending(&self) -> bool {
+        !self.is_ready()
+    }
+
+    /// Checks if asset referenced by this handle is loaded.
+    pub fn is_ready(&self) -> bool {
+        self.state.set.load(Ordering::Relaxed)
+    }
+
     /// Returns asset instance if it's loaded.
     pub fn get(&self) -> Option<&A> {
         match self.query() {
             Poll::Ready(Ok(asset)) => Some(asset),
             _ => None,
         }
+    }
+
+    pub(crate) fn set(&self, result: Result<A, Error<A>>) {
+        assert!(!self.state.set.load(Ordering::SeqCst));
+        unsafe {
+            ptr::write((&mut *self.state.storage.get()).as_mut_ptr(), result);
+        }
+        self.state.set.store(true, Ordering::Release);
+        self.state.wakers.lock().drain(..).for_each(Waker::wake);
     }
 }
 

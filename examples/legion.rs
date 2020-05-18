@@ -2,10 +2,9 @@
 core::compile_error!("This example cannot be built for wasm32 target");
 
 use {
-    futures_task::noop_waker_ref,
     goods::*,
     legion::{entity::Entity, world::World},
-    std::{iter::once, path::Path, task::Context},
+    std::{iter::once, path::Path},
 };
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -28,7 +27,7 @@ struct VelPosFormat;
 #[derive(Debug, Clone)]
 struct VelPosEntity(Entity);
 
-impl Asset for VelPosEntity {
+impl SyncAsset for VelPosEntity {
     type Error = ron::de::Error;
     type Context = World;
     type Repr = VelPos;
@@ -64,7 +63,7 @@ fn main() {
         .build();
 
     // Create new asset cache with built registry.
-    let cache = Cache::new(registry);
+    let cache = Cache::new(registry, futures_executor::ThreadPool::new().unwrap());
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
@@ -72,22 +71,15 @@ fn main() {
     // `Object`s default format is json, so we don't have to specify it here.
     let entity: Handle<VelPosEntity> = cache.load("velpos.ron");
 
-    // Dummy async context.
-    let mut ctx = Context::from_waker(noop_waker_ref());
-
-    // Drive async loading tasks.
-    // `FsSource` is not trully asynchronous as it uses `std::fs::File` API which is sync.
-    // `FsSource::read` returns future that will be resolved on first `poll`.
-    // So we expect loading to be finished after single call.
-    let _ = cache.loader().poll(&mut ctx);
-
     // Create legion world that will receive loaded entities.
     let mut world = World::new();
 
-    // Process raw assets into their final form.
-    // This variant of the function accept context
-    // which is `legion::World` for entities.
-    cache.process(&mut world);
+    while entity.is_pending() {
+        // Process raw assets into their final form.
+        cache.process(&mut world);
+
+        std::thread::yield_now();
+    }
 
     // Unwrap loaded entity.
     let VelPosEntity(entity) = *entity.get().unwrap();

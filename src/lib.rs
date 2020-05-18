@@ -42,30 +42,31 @@
 extern crate alloc;
 
 mod asset;
+mod channel;
 mod formats;
 mod handle;
-mod loader;
 mod process;
-mod queue;
 mod registry;
 mod source;
+mod spawn;
 mod sync;
 
 #[cfg(feature = "legion")]
 mod legion;
 
-pub use self::{asset::*, formats::*, handle::*, loader::*, registry::*, registry::*, source::*};
+pub use self::{asset::*, formats::*, handle::*, registry::*, registry::*, source::*, spawn::*};
 
 use {
     crate::{
-        process::AnyProcesses,
-        queue::Queue,
-        sync::{Lock, Ptr, WeakPtr},
+        channel::{slot, Sender},
+        process::{AnyProcess, Process, Processor},
+        sync::{BoxFuture, Lock, Ptr, Send, Sync},
     },
-    alloc::boxed::Box,
+    alloc::{boxed::Box, vec::Vec},
     core::{
         any::TypeId,
         fmt::{self, Debug, Display},
+        future::Future,
         hash::Hash,
     },
     hashbrown::hash_map::{Entry, HashMap},
@@ -81,6 +82,9 @@ use alloc::sync::Arc;
 pub enum Error<A: Asset> {
     /// Asset was not found among registered sources.
     NotFound,
+
+    /// Failed to spawn loading task.
+    SpawnError,
 
     /// Asset instance decoding or building failed.
     ///
@@ -111,6 +115,18 @@ pub enum Error<A: Asset> {
     Source(Arc<dyn std::error::Error + Send + Sync>),
 }
 
+impl<A> From<SourceError> for Error<A>
+where
+    A: Asset,
+{
+    fn from(err: SourceError) -> Self {
+        match err {
+            SourceError::NotFound => Error::NotFound,
+            SourceError::Error(err) => Error::Source(err),
+        }
+    }
+}
+
 impl<A> Clone for Error<A>
 where
     A: Asset,
@@ -118,6 +134,7 @@ where
     fn clone(&self) -> Self {
         match self {
             Error::NotFound => Error::NotFound,
+            Error::SpawnError => Error::SpawnError,
             Error::Asset(err) => Error::Asset(err.clone()),
             Error::Source(err) => Error::Source(err.clone()),
         }
@@ -131,6 +148,7 @@ where
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::NotFound => fmt.write_str("Error::NotFound"),
+            Error::SpawnError => fmt.write_str("Error::SpawnError"),
             Error::Asset(err) => write!(fmt, "Error::Asset({})", err),
             Error::Source(err) => write!(fmt, "Error::Source({})", err),
         }
@@ -144,6 +162,7 @@ where
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::NotFound => fmt.write_str("Asset not found"),
+            Error::SpawnError => fmt.write_str("Failed to spawn loading task"),
             Error::Asset(err) => write!(fmt, "Asset error: {}", err),
             Error::Source(err) => write!(fmt, "Source error: {}", err),
         }
@@ -158,6 +177,7 @@ where
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::NotFound => None,
+            Error::SpawnError => None,
             Error::Asset(err) => Some(&**err),
             Error::Source(err) => Some(&**err),
         }
@@ -169,13 +189,26 @@ where
 /// Caches loaded assets and provokes loading work for new assets.
 pub struct Cache<K> {
     registry: Registry<K>,
-    pub(crate) inner: Ptr<Inner<K>>,
+    #[cfg(not(feature = "sync"))]
+    inner: Ptr<Inner<K, dyn Spawn>>,
+
+    #[cfg(feature = "sync")]
+    inner: Ptr<Inner<K, dyn Spawn + Send + Sync>>,
 }
 
-struct Inner<K> {
+struct Inner<K, S: ?Sized> {
     cache: Lock<HashMap<(TypeId, K), AnyHandle>>,
-    processes: Lock<HashMap<TypeId, AnyProcesses<K>>>,
-    pub(crate) loader: Queue<LoaderTask<K>>,
+    processor: Processor,
+    spawn: S,
+}
+
+impl<K> Debug for Cache<K> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.debug_struct("goods::Cache")
+            .field("registry", &self.registry)
+            .field("spawn", &&self.inner.spawn)
+            .finish()
+    }
 }
 
 impl<K> Clone for Cache<K> {
@@ -191,13 +224,16 @@ impl<K> Cache<K> {
     /// Creates new asset cache.
     /// Assets will be loaded from provided `registry`.
     /// Loading tasks will be sent to `Loader`.
-    pub fn new(registry: Registry<K>) -> Self {
+    pub fn new<S>(registry: Registry<K>, spawn: S) -> Self
+    where
+        S: Spawn + Send + Sync + 'static,
+    {
         Cache {
             registry,
             inner: Ptr::new(Inner {
                 cache: Lock::default(),
-                processes: Lock::default(),
-                loader: Queue::new(),
+                processor: Processor::new(),
+                spawn,
             }),
         }
     }
@@ -233,22 +269,32 @@ impl<K> Cache<K> {
                 any.downcast::<A>().unwrap()
             }
             Entry::Vacant(entry) => {
-                let (handle, slot) = self
-                    .inner
-                    .processes
-                    .lock()
-                    .entry(TypeId::of::<A::Context>())
-                    .or_insert_with(|| AnyProcesses::new::<A::Context>())
-                    .alloc();
-
+                let handle = Handle::new();
                 entry.insert(handle.clone().into());
                 drop(lock);
 
-                self.inner.loader.push(LoaderTask::new(
-                    Box::pin(self.registry.clone().read(key)),
-                    format,
-                    slot,
-                ));
+                let task: BoxFuture<'_, _> =
+                    if TypeId::of::<A::Context>() == TypeId::of::<PhantomContext>() {
+                        Box::pin(load_asset_with_phantom_context(
+                            self.registry.clone().read(key),
+                            format,
+                            self.clone(),
+                            handle.clone(),
+                        ))
+                    } else {
+                        Box::pin(load_asset(
+                            self.registry.clone().read(key),
+                            format,
+                            self.clone(),
+                            self.inner.processor.sender::<A>(),
+                            handle.clone(),
+                        ))
+                    };
+
+                if let Err(SpawnError) = self.inner.spawn.spawn(task) {
+                    handle.set(Err(Error::SpawnError));
+                }
+
                 handle
             }
         }
@@ -260,63 +306,7 @@ impl<K> Cache<K> {
     where
         K: 'static,
     {
-        let mut lock = self.inner.processes.lock();
-        if let Some(processes) = lock.get_mut(&TypeId::of::<C>()) {
-            let processes = processes.run();
-            drop(lock);
-            for process in processes {
-                process.run(ctx);
-            }
-        }
-    }
-
-    /// Process all `SimpleAsset`s.
-    pub fn process_simple(&self)
-    where
-        K: 'static,
-    {
-        self.process(&mut PhantomContext);
-    }
-
-    /// Create loader for this `Cache`.
-    /// `Loader` will drive async loading tasks to completion
-    /// and resolves only after `Cache` is destroyed (all clones are dropped).
-    /// To await only pending tasks use `Loader::flush` method.
-    pub fn loader(&self) -> Loader<K> {
-        Loader::new(self)
-    }
-
-    fn downgrade(&self) -> WeakCache<K> {
-        WeakCache {
-            registry: self.registry.clone(),
-            inner: Ptr::downgrade(&self.inner),
-        }
-    }
-}
-
-struct WeakCache<K> {
-    registry: Registry<K>,
-    inner: WeakPtr<Inner<K>>,
-}
-
-impl<K> Clone for WeakCache<K> {
-    fn clone(&self) -> Self {
-        WeakCache {
-            registry: self.registry.clone(),
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<K> WeakCache<K> {
-    fn upgrade(&self) -> Option<Cache<K>> {
-        let inner = self.inner.upgrade()?;
-
-        Cache {
-            registry: self.registry.clone(),
-            inner,
-        }
-        .into()
+        self.inner.processor.run(ctx);
     }
 }
 
@@ -328,4 +318,56 @@ fn test_loader_send_sync<K: Send>() {
 
     is_send::<Cache<K>>();
     is_sync::<Cache<K>>();
+}
+
+pub(crate) async fn load_asset<A, F, K, L>(
+    loading: L,
+    format: F,
+    cache: Cache<K>,
+    process_sender: Sender<Box<dyn AnyProcess<A::Context>>>,
+    handle: Handle<A>,
+) where
+    A: Asset,
+    F: Format<A, K>,
+    L: Future<Output = Result<Vec<u8>, SourceError>> + Send + 'static,
+{
+    handle.set(
+        async move {
+            let bytes = loading.await?;
+            let decode = format.decode(bytes, &cache);
+            drop(cache);
+            let repr = decode.await.map_err(|err| Error::Asset(Ptr::new(err)))?;
+            let (slot, setter) = slot::<A::BuildFuture>();
+            process_sender.send(Box::new(Process::<A> { repr, setter }));
+            slot.await.await.map_err(|err| Error::Asset(Ptr::new(err)))
+        }
+        .await,
+    )
+}
+
+pub(crate) async fn load_asset_with_phantom_context<A, F, K, L>(
+    loading: L,
+    format: F,
+    cache: Cache<K>,
+    handle: Handle<A>,
+) where
+    A: Asset,
+    F: Format<A, K>,
+    L: Future<Output = Result<Vec<u8>, SourceError>> + Send + 'static,
+{
+    debug_assert_eq!(TypeId::of::<A::Context>(), TypeId::of::<PhantomContext>());
+
+    handle.set(
+        async move {
+            let bytes = loading.await?;
+            let decode = format.decode(bytes, &cache);
+            drop(cache);
+            let repr = decode.await.map_err(|err| Error::Asset(Ptr::new(err)))?;
+            let build = A::build(repr, unsafe {
+                &mut *{ &mut PhantomContext as *mut _ as *mut A::Context }
+            });
+            build.await.map_err(|err| Error::Asset(Ptr::new(err)))
+        }
+        .await,
+    )
 }

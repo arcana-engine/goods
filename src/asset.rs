@@ -37,8 +37,11 @@ pub trait Asset: Send + Sync + Sized + Clone + 'static {
     /// This representation is constructed by `Format::decode`.
     type Repr: Send;
 
+    /// Asynchronous result produced by asset building.
+    type BuildFuture: Future<Output = Result<Self, Self::Error>> + Send + 'static;
+
     /// Build asset instance from intermediate representation using provided context.
-    fn build(repr: Self::Repr, ctx: &mut Self::Context) -> Result<Self, Self::Error>;
+    fn build(repr: Self::Repr, ctx: &mut Self::Context) -> Self::BuildFuture;
 }
 
 /// Format trait interprets raw bytes as an asset.
@@ -71,6 +74,7 @@ where
 {
     type DecodeFuture = Ready<Result<A::Repr, A::Error>>;
 
+    #[inline]
     fn decode(self, bytes: Vec<u8>, _loader: &Cache<K>) -> Self::DecodeFuture {
         Ready(Some(LeafFormat::decode(self, bytes)))
     }
@@ -92,6 +96,42 @@ impl<T> Future for Ready<T> {
     }
 }
 
+pub trait SyncAsset: Send + Sync + Sized + Clone + 'static {
+    /// Error that may occur during asset loading.
+    #[cfg(feature = "std")]
+    type Error: Error + Send + Sync;
+
+    /// Error that may occur during asset loading.
+    #[cfg(not(feature = "std"))]
+    type Error: Display + Send + Sync;
+
+    /// Asset processing context.
+    /// Instance of context is required to convert asset intermediate representation into asset instance.
+    type Context;
+
+    /// Intermediate representation type for the asset.
+    /// This representation is constructed by `Format::decode`.
+    type Repr: Send;
+
+    /// Build asset instance from intermediate representation using provided context.
+    fn build(repr: Self::Repr, ctx: &mut Self::Context) -> Result<Self, Self::Error>;
+}
+
+impl<S> Asset for S
+where
+    S: SyncAsset,
+{
+    type Error = S::Error;
+    type Repr = S::Repr;
+    type Context = S::Context;
+    type BuildFuture = Ready<Result<Self, Self::Error>>;
+
+    #[inline]
+    fn build(repr: S::Repr, ctx: &mut S::Context) -> Ready<Result<Self, Self::Error>> {
+        Ready(Some(S::build(repr, ctx)))
+    }
+}
+
 /// Dummy context for assets that doesn't require one.
 pub struct PhantomContext;
 
@@ -106,7 +146,7 @@ pub trait SimpleAsset: Send + Sync + Sized + Clone + 'static {
     type Error: Display + Send + Sync;
 }
 
-impl<S> Asset for S
+impl<S> SyncAsset for S
 where
     S: SimpleAsset,
 {
@@ -114,6 +154,7 @@ where
     type Repr = Self;
     type Context = PhantomContext;
 
+    #[inline]
     fn build(repr: Self, _ctx: &mut PhantomContext) -> Result<Self, Self::Error> {
         Ok(repr)
     }

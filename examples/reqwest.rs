@@ -6,10 +6,7 @@ core::compile_error!("This example cannot be built for wasm32 target");
 
 extern crate alloc;
 
-use {
-    goods::*,
-    std::{collections::HashMap, time::Duration},
-};
+use {goods::*, std::collections::HashMap};
 
 /// First we defined type to represent our assets.
 #[derive(Clone, Debug, serde::Deserialize, PartialEq, Eq)]
@@ -83,7 +80,8 @@ async fn main() {
         .build();
 
     // Create new asset cache with built registry.
-    let cache = Cache::new(registry);
+    // Spawn loading tasks in `tokio` runtime.
+    let cache = Cache::new(registry, Tokio::current());
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
@@ -91,10 +89,6 @@ async fn main() {
     // `Object`s default format is json, so we don't have to specify it here.
     let object_json: Handle<Object> =
         cache.load("https://raw.githubusercontent.com/zakarumych/goods/master/examples/asset.json");
-
-    // Spawn a task that will await for all loads to complete.
-    // This task will resolve only after `cache` is destroyed (all clones) which esnures that there will be no new tasks.
-    tokio::spawn(cache.loader());
 
     // Another asset will be "asset.yaml".
     // Again, sibling file with the name will be read by `FsSource` we added in the registry.
@@ -104,18 +98,6 @@ async fn main() {
         "https://raw.githubusercontent.com/zakarumych/goods/master/examples/asset.yaml",
         YamlFormat,
     );
-
-    // Spawn a task to complete assets loading.
-    tokio::spawn(async move {
-        loop {
-            // Process all `Asset` implementations that need no real context to finish.
-            // This is the case for `SimpleAsset` implementations.
-            cache.process(&mut PhantomContext);
-
-            // Make a 1ms delay between calls to the process function.
-            tokio::time::delay_for(Duration::from_millis(1)).await;
-        }
-    });
 
     // Await for handles treating them as `Future`.
     println!("From json: {:#?}", object_json.await);

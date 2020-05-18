@@ -73,7 +73,7 @@ impl std::error::Error for SourceError {
 }
 
 /// Asset data source.
-pub trait Source<K: ?Sized>: Send + Sync + 'static {
+pub trait Source<K: ?Sized>: core::fmt::Debug + Send + Sync + 'static {
     /// Reads asset asynchronously.
     /// Returns async bytes on success.
     /// Otherwise returns error `E` describing occurred problem.

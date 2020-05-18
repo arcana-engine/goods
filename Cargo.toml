@@ -1,6 +1,6 @@
 [package]
 name = "goods"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["zakarumych"]
 edition = "2018"
 description = "Asset manager for good assets"
@@ -26,9 +26,16 @@ reqwest-default-tls = ["reqwest/default-tls"]
 reqwest-native-tls = ["reqwest/native-tls"]
 reqwest-rustls-tls = ["reqwest/rustls-tls"]
 
+futures-spawn = ["futures-task", "futures-util", "sync"]
+wasm-bindgen-spawn = ["wasm-bindgen-futures"]
+tokio-spawn = ["tokio/rt-core", "sync"]
+
 [dependencies]
 futures-core = { version = "0.3", default-features = false, features = ["alloc"] }
-log = { version = "0.4", default-features = false, features = ["max_level_trace", "release_max_level_trace"] }
+futures-task = { version = "0.3", default-features = false, optional = true }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"], optional = true }
+
+log = { version = "0.4", default-features = false }
 pin-utils = { version = "0.1.0-alpha.4", default-features = false }
 hashbrown = { version = "0.7" }
 spin = { version = "0.5", optional = true }
@@ -40,6 +47,7 @@ ron = { version = "0.5", optional = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = { version = "0.10", optional = true, default-features = false }
+tokio = { version = "0.2", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3.39", optional = true }
@@ -49,31 +57,32 @@ wasm-bindgen-futures = { version = "0.4.12", optional = true }
 
 [dev-dependencies]
 thiserror = "1.0"
-futures-task = { version = "0.3" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 env_logger = "0.7"
 tokio = { version = "0.2", features = ["rt-core", "macros"] }
 legion = "0.2"
+futures-executor = { version = "0.3", features = ["thread-pool"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 console_log = "0.2.0"
+web-sys = { version = "0.3.39", features = ["Document", "Text", "HtmlElement", "Node"] }
 
 [[example]]
 name = "fs"
-required-features = ["fs", "json-format", "yaml-format"]
+required-features = ["fs", "json-format", "yaml-format", "futures-spawn"]
 
 [[example]]
 name = "reqwest"
-required-features = ["reqwest", "json-format", "sync"]
+required-features = ["reqwest", "json-format", "yaml-format", "tokio-spawn", "reqwest-default-tls"]
 
 [[example]]
 name = "legion"
-required-features = ["fs", "ron-format"]
+required-features = ["fs", "ron-format", "futures-spawn"]
 
 [[example]]
 name = "fetch"
-required-features = ["fetch", "json-format", "yaml-format"]
+required-features = ["fetch", "json-format", "yaml-format", "wasm-bindgen-spawn"]
 crate-type = ["cdylib"]
 
 [package.metadata.docs.rs]

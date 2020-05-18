@@ -10,6 +10,7 @@ use {
 /// Asset source that treats asset key as URL and fetches data from it.
 /// Based on `reqwest` crate.
 #[cfg_attr(doc, doc(cfg(feature = "reqwest")))]
+#[derive(Debug)]
 pub struct ReqwestSource {
     client: Client,
 }
