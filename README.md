@@ -42,33 +42,33 @@ Here's list of some of those features:
 
 ## Features
 
-All out-of-the-box functionality execut core traits and types are enabled with features.
+All out-of-the-box functionality exept core traits and types are enabled with features.
 
 ### General
 
-* `std` - adds implementation of `std::error::Error` trait for error types.
+* `std` - adds implementation of [`std::error::Error`] trait for error types.
   Enabled by default.
-* `sync` - makes most types `Send` and some `Sync`. Adds requirements for traits implementations to be `Send` and `Sync` where needed.
+* `sync` - makes most types [`Send`] and some [`Sync`]. Adds requirements for traits implementations to be `Send` and `Sync` where needed.
   Enabled by default.
 
 ### Sources
 
-* `fs` (enables `std`) - adds `FileSource` - `Source` implementation that loads asset bytes from file-system.
-* `reqwest` - adds `ReqwestSource` - `Source` implementation that loads asset bytes from URLs using `reqwest`.
-  Using this source requires `Loader` to be polled by `tokio`. Otherwise `reqwest` interals will panic.
-* `fetch` - adds `FetchSource` that uses browser's Fetch API to load assets data. *Conflicts with `sync` feature*.
+* `fs` (enables `std`) - adds [`FileSource`] - [`Source`] implementation that loads asset bytes from file-system.
+* `reqwest` - adds [`ReqwestSource`] - [`Source`] implementation that loads asset bytes from URLs using `reqwest`.
+  Using this source requires spawner to spawn tasks with [`tokio`]. Otherwise [`reqwest`] interals will panic.
+* `fetch` - adds [`FetchSource`] that uses browser's Fetch API to load assets data. *Conflicts with `sync` feature*.
 
 ### Formats
 
-* `json-format` - adds `Format` implementation that treats asset bytes as JSON document and deserializes asset representation via serde
-* `yaml-format` - adds `Format` implementation that treats asset bytes as YAML document and deserializes asset representation via serde
-* `ron-format` - adds `Format` implementation that treats asset bytes as RON document and deserializes asset representation via serde
+* `json-format` - adds [`JsonFormat`] - [`Format`] implementation that treats asset bytes as JSON document and deserializes asset representation via serde
+* `yaml-format` - adds [`YamlFormat`] - [`Format`] implementation that treats asset bytes as YAML document and deserializes asset representation via serde
+* `ron-format` - adds [`RonFormat`] - [`Format`] implementation that treats asset bytes as RON document and deserializes asset representation via serde
 
 ### Spawners
 
-* `futures-spawn` - adds `Spawn` implementation for `futures_task::Spawn`(aka `futures::task::Spawn`) allowing to use compatible spawners to drive loading tasks to completion.
-* `wasm-bindgen-spawn` - adds `Spawn` implementations that uses `wasm_bindgen_futures::spawn_local` to drive loadin tasks. Usable only on `wasm32` target.
-* `tokio-spawn` - adds `Spawn` implementation for `tokio::runtime::Handle` wrapper allowing tokio to drive loading tasks. `reqwest` based source requires `tokio` runtime.
+* `futures-spawn` - adds [`Spawn`] implementation for [`futures_task::Spawn`](aka [`futures::task::Spawn`]) allowing to use compatible spawners to drive loading tasks to completion.
+* `wasm-bindgen-spawn` - adds [`Spawn`] implementations that uses [`wasm_bindgen_futures::spawn_local`] to drive loadin tasks. Usable only on `wasm32` target.
+* `tokio-spawn` - adds [`Spawn`] implementation for [`goods::Tokio`]([`tokio::runtime::Handle`] wrapper) allowing tokio to drive loading tasks. [`ReqwestSource`] requires [`tokio`] runtime.
 
 ## Examples
 
@@ -95,7 +95,7 @@ build-wasm32 fetch --features std,fetch,json-format,yaml-format,wasm-bindgen-spa
 python3 server.py
 ```
 
-Then open http://localhost:8000/fetch
+Then open http://localhost:8000/fetch in your favorite browser.
 Loaded assets must be shown on the page. Otherwise see for errors in log.
 
 ## Gotchas
@@ -115,3 +115,24 @@ at your option.
 ### Contribution Licensing
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+
+[`std::error::Error`]: https://doc.rust-lang.org/std/error/trait.Error.html
+[`Send`]: https://doc.rust-lang.org/std/marker/trait.Send.html
+[`Sync`]: https://doc.rust-lang.org/std/marker/trait.Sync.html
+[`FileSource`]: https://docs.rs/goods/latest/goods/struct.FileSource.html
+[`Source`]: https://docs.rs/goods/latest/goods/trait.Source.html
+[`ReqwestSource`]: https://docs.rs/goods/latest/goods/struct.ReqwestSource.html
+[`FetchSource`]: https://docs.rs/goods/latest/wasm32-unknown-unknown/goods/struct.FetchSource.html
+[`tokio`]: https://docs.rs/tokio
+[`reqwest`]: https://docs.rs/reqwest
+[`Format`]: https://docs.rs/goods/latest/goods/trait.Format.html
+[`JsonFormat`]: https://docs.rs/goods/latest/goods/struct.JsonFormat.html
+[`YamlFormat`]: https://docs.rs/goods/latest/goods/struct.YamlFormat.html
+[`RonFormat`]: https://docs.rs/goods/latest/goods/struct.RonFormat.html
+[`Spawn`]: https://docs.rs/goods/latest/goods/trait.Spawn.html
+[`future_task::Spawn`]: https://docs.rs/futures-task/0.3/futures_task/trait.Spawn.html
+[`future::task::Spawn`]: https://docs.rs/futures/0.3/futures/task/trait.Spawn.html
+[`wasm_bindgen_futures::spawn_local`]: https://docs.rs/wasm-bindgen-futures/0.4/wasm_bindgen_futures/fn.spawn_local.html
+[`goods::Tokio`]: ./src/spawn.rs#L21
+[`tokio::runtime::Handle`]: https://docs.rs/tokio/0.2/tokio/runtime/struct.Handle.html
