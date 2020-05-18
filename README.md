@@ -91,7 +91,7 @@ This example can be built using [build-wasm32.sh](./examples/build-wasm32.sh) or
 
 ```sh
 cd examples
-build-wasm32 fetch --features fetch,json-format,yaml-format,wasm-spawn
+build-wasm32 fetch --features std,fetch,json-format,yaml-format,wasm-bindgen-spawn
 python3 server.py
 ```
 
