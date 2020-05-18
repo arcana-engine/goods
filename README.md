@@ -101,7 +101,7 @@ Loaded assets must be shown on the page. Otherwise see for errors in log.
 ## Gotchas
 
 * Currently asyn/await doesn't work with `no_std` on `stable`
-* `sync` is conflicts with `fetch` feature. But in general `sync` is not necessary when targeting web browser.
+* `sync` conflicts with `fetch` feature. But in general `sync` is not necessary when targeting web browser.
 
 ## License
 
