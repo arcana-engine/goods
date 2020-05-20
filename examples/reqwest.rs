@@ -1,6 +1,3 @@
-//!
-//! Before running this example run `python -m http.server` in this example's directory.
-//!
 #[cfg(target_arch = "wasm32")]
 core::compile_error!("This example cannot be built for wasm32 target");
 
