@@ -1,7 +1,7 @@
 use {
     crate::{
         sync::{Send, Sync},
-        Cache,
+        Cache, Ready,
     },
     alloc::vec::Vec,
     core::{
@@ -59,41 +59,6 @@ pub trait Format<A: Asset, K>: Send + 'static {
 pub trait AssetDefaultFormat<K>: Asset {
     /// Default format for asset.
     type DefaultFormat: Format<Self, K> + Default;
-}
-
-/// Trait for formats that loads assets immediately.
-pub trait LeafFormat<A: Asset, K>: Send + 'static {
-    /// Loads asset from raw data using asset context and cache.
-    fn decode(self, bytes: Vec<u8>) -> Result<A::Repr, A::Error>;
-}
-
-impl<A, K, F> Format<A, K> for F
-where
-    A: Asset,
-    F: LeafFormat<A, K>,
-{
-    type DecodeFuture = Ready<Result<A::Repr, A::Error>>;
-
-    #[inline]
-    fn decode(self, bytes: Vec<u8>, _loader: &Cache<K>) -> Self::DecodeFuture {
-        Ready(Some(LeafFormat::decode(self, bytes)))
-    }
-}
-
-/// Immediatelly ready future.
-#[doc(hidden)]
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Ready<T>(Option<T>);
-
-impl<T> Unpin for Ready<T> {}
-
-impl<T> Future for Ready<T> {
-    type Output = T;
-
-    #[inline]
-    fn poll(mut self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<T> {
-        Poll::Ready(self.0.take().expect("Ready polled after completion"))
-    }
 }
 
 pub trait SyncAsset: Send + Sync + Sized + Clone + 'static {

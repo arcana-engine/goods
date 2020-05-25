@@ -42,6 +42,7 @@
 extern crate alloc;
 
 mod asset;
+mod bytes;
 mod channel;
 mod formats;
 mod handle;
@@ -50,9 +51,6 @@ mod registry;
 mod source;
 mod spawn;
 mod sync;
-
-#[cfg(feature = "legion")]
-mod legion;
 
 pub use self::{asset::*, formats::*, handle::*, registry::*, registry::*, source::*, spawn::*};
 
@@ -68,6 +66,8 @@ use {
         fmt::{self, Debug, Display},
         future::Future,
         hash::Hash,
+        pin::Pin,
+        task::{Context, Poll},
     },
     hashbrown::hash_map::{Entry, HashMap},
 };
@@ -77,6 +77,28 @@ use alloc::rc::Rc;
 
 #[cfg(feature = "sync")]
 use alloc::sync::Arc;
+
+/// Immediatelly ready future.
+/// Can be used for `Format::DecodeFuture`
+/// when format doesn't need to await anything.
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub struct Ready<T>(Option<T>);
+
+impl<T> Unpin for Ready<T> {}
+
+impl<T> Future for Ready<T> {
+    type Output = T;
+
+    #[inline]
+    fn poll(mut self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<T> {
+        Poll::Ready(self.0.take().expect("Ready polled after completion"))
+    }
+}
+
+/// Creates immediately ready future.
+pub fn ready<T>(value: T) -> Ready<T> {
+    Ready(Some(value))
+}
 
 /// Error occured in process of asset loading.
 pub enum Error<A: Asset> {
