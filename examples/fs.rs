@@ -24,38 +24,12 @@ enum Kind {
     Yaml,
 }
 
-/// Possible errors include json and yaml errors.
-#[derive(Debug, thiserror::Error)]
-enum Error {
-    #[error("Json parsing error: {0}")]
-    Json(serde_json::Error),
-
-    #[error("Yaml parsing error: {0}")]
-    Yaml(serde_yaml::Error),
-}
-
-/// To use out-of-the-box `JsonFormat` this error must be convertible from json error.
-impl From<serde_json::Error> for Error {
-    fn from(err: serde_json::Error) -> Self {
-        Error::Json(err)
-    }
-}
-
-/// To use out-of-the-box `YamlFormat` this error must be convertible from json error.
-impl From<serde_yaml::Error> for Error {
-    fn from(err: serde_yaml::Error) -> Self {
-        Error::Yaml(err)
-    }
-}
-
 /// We implement `SimpleAsset` for `Object` as it doesn't require any contextual conversion.
 /// If asset type requires access to some context (like texture asset may require access to graphics context)
 /// it must implemet `Asset` type then.
 ///
 /// `SimpleAsset` implementations implement `Asset` automagically.
-impl SimpleAsset for Object {
-    type Error = Error;
-}
+impl SimpleAsset for Object {}
 
 /// Let's say that default format for `Object` is `JsonFormat`.
 /// Only format types that implement `Default` may be default formats.

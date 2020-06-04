@@ -22,9 +22,11 @@ use {
     core::fmt::{self, Debug, Display},
 };
 
-/// Error type for `Source`s.
+/// Error type for [`Source`]s.
+///
+/// [`Source`]: ./trait.Source.html
 pub enum SourceError {
-    /// File not found in the source.
+    /// Asset is not found in the source.
     NotFound,
 
     /// Custom source error.

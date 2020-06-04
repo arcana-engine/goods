@@ -123,7 +123,7 @@ where
     /// Queries for the asset state.
     /// Returns `Poll::Ready(Ok(asset))` if asset was successfully loaded.
     /// Returns `Poll::Ready(Err(error))` if error occured.
-    /// Otherwise returns `Poll::Pending` if asset wasn't yet loaded.
+    /// Otherwise returns `Poll::Pending` as asset wasn't yet loaded.
     pub fn query(&self) -> Poll<&Result<A, Error<A>>> {
         if self.state.set.load(Ordering::Acquire) {
             Poll::Ready(unsafe { &*(self.state.storage.get() as *mut Result<A, Error<A>>) })

@@ -5,6 +5,7 @@ use {
         ready, Cache, PhantomContext, Ready,
     },
     alloc::vec::Vec,
+    core::convert::Infallible,
 };
 
 #[cfg(feature = "serde")]
@@ -16,12 +17,14 @@ pub struct PassthroughFormat;
 
 impl<A, K> Format<A, K> for PassthroughFormat
 where
-    A: Asset<Repr = Vec<u8>>,
+    A: Asset,
+    A::Repr: From<Vec<u8>>,
 {
-    type DecodeFuture = Ready<Result<A::Repr, A::Error>>;
+    type Error = Infallible;
+    type DecodeFuture = Ready<Result<A::Repr, Infallible>>;
 
-    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, A::Error>> {
-        ready(Ok(bytes))
+    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, Infallible>> {
+        ready(Ok(bytes.into()))
     }
 }
 
@@ -37,11 +40,15 @@ impl<A, K> Format<A, K> for JsonFormat
 where
     A: Asset,
     A::Repr: DeserializeOwned,
-    A::Error: From<serde_json::Error>,
 {
-    type DecodeFuture = Ready<Result<A::Repr, A::Error>>;
+    type Error = serde_json::Error;
+    type DecodeFuture = Ready<Result<A::Repr, Self::Error>>;
 
-    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, A::Error>> {
+    fn decode(
+        self,
+        bytes: Vec<u8>,
+        _cache: &Cache<K>,
+    ) -> Ready<Result<A::Repr, serde_json::Error>> {
         ready(serde_json::from_slice(&bytes).map_err(Into::into))
     }
 }
@@ -58,11 +65,15 @@ impl<A, K> Format<A, K> for YamlFormat
 where
     A: Asset,
     A::Repr: DeserializeOwned,
-    A::Error: From<serde_yaml::Error>,
 {
-    type DecodeFuture = Ready<Result<A::Repr, A::Error>>;
+    type Error = serde_yaml::Error;
+    type DecodeFuture = Ready<Result<A::Repr, Self::Error>>;
 
-    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, A::Error>> {
+    fn decode(
+        self,
+        bytes: Vec<u8>,
+        _cache: &Cache<K>,
+    ) -> Ready<Result<A::Repr, serde_yaml::Error>> {
         ready(serde_yaml::from_slice(&bytes).map_err(Into::into))
     }
 }
@@ -79,11 +90,11 @@ impl<A, K> Format<A, K> for RonFormat
 where
     A: Asset,
     A::Repr: DeserializeOwned,
-    A::Error: From<ron::de::Error>,
 {
-    type DecodeFuture = Ready<Result<A::Repr, A::Error>>;
+    type Error = ron::de::Error;
+    type DecodeFuture = Ready<Result<A::Repr, Self::Error>>;
 
-    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, A::Error>> {
+    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, ron::de::Error>> {
         ready(ron::de::from_bytes(&bytes).map_err(Into::into))
     }
 }

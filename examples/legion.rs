@@ -4,7 +4,7 @@ core::compile_error!("This example cannot be built for wasm32 target");
 use {
     goods::*,
     legion::{entity::Entity, world::World},
-    std::{iter::once, path::Path},
+    std::{convert::Infallible, iter::once, path::Path},
 };
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -28,11 +28,11 @@ struct VelPosFormat;
 struct VelPosEntity(Entity);
 
 impl SyncAsset for VelPosEntity {
-    type Error = ron::de::Error;
+    type Error = Infallible;
     type Context = World;
     type Repr = VelPos;
 
-    fn build(repr: VelPos, world: &mut World) -> Result<Self, ron::de::Error> {
+    fn build(repr: VelPos, world: &mut World) -> Result<Self, Infallible> {
         if let &[e] = world.insert((), once((repr.vel, repr.pos))) {
             Ok(VelPosEntity(e))
         } else {
