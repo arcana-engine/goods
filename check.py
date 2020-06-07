@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
+import asyncio
 import subprocess
-import sys
 
 
 def powerset(input):
@@ -18,22 +18,22 @@ def powerset(input):
     return subset + with_pivot
 
 
-def check(*, toolchain='stable', target=None, features=[], mandatory_features=[]):
+async def check(*, toolchain='stable', target=None, features=[], mandatory_features=[]):
     for subset in powerset(features):
         subset = set(subset) | set(mandatory_features)
 
-        cmd = ["cargo", f'+{toolchain}', "check",
-               "--no-default-features", "--examples"]
+        args = [f'+{toolchain}', 'check',
+                '--no-default-features', '--examples']
         if len(subset) > 0:
-            cmd.append(f'--features={",".join(subset)}')
+            args.append(f'--features={",".join(subset)}')
 
         if target is not None:
-            cmd.append(f'--target={target}')
+            args.append(f'--target={target}')
 
-        print(" ".join(cmd))
-        status = subprocess.run(cmd)
-        if status.returncode != 0:
-            sys.exit(1)
+        proc = await asyncio.create_subprocess_exec('cargo', *args, stderr=subprocess.PIPE)
+        returncode = await proc.wait()
+        if returncode != 0:
+            raise Exception(f'`cargo {" ".join(args)}` failed\n{proc.stderr}')
 
 
 features = [
@@ -58,8 +58,16 @@ wasm_features = [
     "wasm-bindgen-spawn",
 ]
 
-check(toolchain="nightly", features=features)
-check(toolchain="stable", features=features, mandatory_features=['std'])
-check(toolchain="nightly", target="wasm32-unknown-unknown", features=wasm_features)
-check(toolchain="stable", target="wasm32-unknown-unknown",
-      features=wasm_features, mandatory_features=['std'])
+
+async def main():
+    await asyncio.gather(
+        check(toolchain="nightly", features=features),
+        check(toolchain="stable", features=features,
+              mandatory_features=['std']),
+        check(toolchain="nightly", target="wasm32-unknown-unknown",
+              features=wasm_features),
+        check(toolchain="stable", target="wasm32-unknown-unknown",
+              features=wasm_features, mandatory_features=['std']),
+    )
+
+asyncio.run(main())
