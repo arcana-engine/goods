@@ -137,9 +137,25 @@ where
         !self.is_ready()
     }
 
-    /// Checks if asset referenced by this handle is loaded.
+    /// Checks if loading of the asset referenced by this handle is complete.
     pub fn is_ready(&self) -> bool {
         self.state.set.load(Ordering::Relaxed)
+    }
+
+    /// Checks if loading of the asset referenced by this handle failed.
+    pub fn is_err(&self) -> bool {
+        match self.query() {
+            Poll::Pending => false,
+            Poll::Ready(result) => result.is_err(),
+        }
+    }
+
+    /// Checks if loading of the asset referenced by this handle succeeded.
+    pub fn is_ok(&self) -> bool {
+        match self.query() {
+            Poll::Pending => false,
+            Poll::Ready(result) => result.is_err(),
+        }
     }
 
     /// Returns asset instance if it's loaded.
