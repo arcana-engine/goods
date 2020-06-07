@@ -91,7 +91,7 @@
 //! [`tokio::runtime::Handle`]: https://docs.rs/tokio/0.2/tokio/runtime/struct.Handle.html
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(doc, feature(doc_cfg))]
+#![cfg_attr(all(doc, feature = "unstable-doc"), feature(doc_cfg))]
 
 extern crate alloc;
 

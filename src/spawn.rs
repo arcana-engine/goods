@@ -18,7 +18,7 @@ where
 
 #[cfg(feature = "tokio-spawn")]
 #[derive(Clone, Debug)]
-#[cfg_attr(doc, doc(cfg(feature = "tokio-spawn")))]
+#[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "tokio-spawn")))]
 pub struct Tokio(pub tokio::runtime::Handle);
 
 #[cfg(feature = "tokio-spawn")]
@@ -38,7 +38,10 @@ impl Spawn for Tokio {
 
 #[cfg(all(feature = "wasm-bindgen-spawn", target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Default)]
-#[cfg_attr(doc, doc(all(feature = "wasm-bindgen-spawn", target_arch = "wasm32")))]
+#[cfg_attr(
+    all(doc, feature = "unstable-doc"),
+    doc(all(feature = "wasm-bindgen-spawn", target_arch = "wasm32"))
+)]
 pub struct WasmBindgen;
 
 #[cfg(all(feature = "wasm-bindgen-spawn", target_arch = "wasm32"))]

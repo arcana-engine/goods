@@ -11,6 +11,7 @@ repository = "https://github.com/zakarumych/goods"
 readme = "README.md"
 
 [features]
+unstable-doc = []
 std = []
 fs = ["std"]
 sync = ["spin"]
@@ -87,7 +88,7 @@ crate-type = ["cdylib"]
 
 [package.metadata.docs.rs]
 no-default-features = true
-features = ["std", "fs", "reqwest", "fetch", "json-format", "yaml-format", "ron-format"]
+features = ["std", "fs", "reqwest", "fetch", "json-format", "yaml-format", "ron-format", "unstable-doc"]
 
 targets = [
     "i686-pc-windows-gnu",

@@ -32,7 +32,7 @@ where
 #[cfg(feature = "json-format")]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(doc, doc(cfg(feature = "json-format")))]
+#[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "json-format")))]
 pub struct JsonFormat;
 
 #[cfg(feature = "json-format")]
@@ -57,7 +57,7 @@ where
 #[cfg(feature = "yaml-format")]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(doc, doc(cfg(feature = "yaml-format")))]
+#[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "yaml-format")))]
 pub struct YamlFormat;
 
 #[cfg(feature = "yaml-format")]
@@ -82,7 +82,7 @@ where
 #[cfg(feature = "ron-format")]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(doc, doc(cfg(feature = "ron-format")))]
+#[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "ron-format")))]
 pub struct RonFormat;
 
 #[cfg(feature = "ron-format")]
