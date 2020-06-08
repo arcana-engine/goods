@@ -2,6 +2,7 @@
 
 import asyncio
 import subprocess
+import sys
 
 
 def powerset(input):
@@ -59,7 +60,7 @@ wasm_features = [
 ]
 
 
-async def main():
+async def run():
     await asyncio.gather(
         check(toolchain="nightly", features=features),
         check(toolchain="stable", features=features,
@@ -70,4 +71,23 @@ async def main():
               features=wasm_features, mandatory_features=['std']),
     )
 
-asyncio.run(main())
+
+def main():
+    (major, minor, micro, _, _) = sys.version_info
+    if major >= 3:
+        if minor >= 7:
+            asyncio.run(run())
+            return
+        elif minor >= 4:
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(run())
+            loop.close()
+            return
+
+    print(
+        f'Python version 3.4+ is required, but current version is {major}.{minor}.{micro}')
+    sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
