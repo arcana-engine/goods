@@ -26,7 +26,7 @@ async def check(*, toolchain='stable', target=None, features=[], mandatory_featu
         args = [f'+{toolchain}', 'check',
                 '--no-default-features', '--examples']
         if len(subset) > 0:
-            args.append(f'--features=\"{",".join(subset)}\"')
+            args.append(f'--features={",".join(subset)}')
 
         if target is not None:
             args.append(f'--target={target}')
