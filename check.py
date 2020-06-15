@@ -26,7 +26,7 @@ async def check(*, toolchain='stable', target=None, features=[], mandatory_featu
         args = [f'+{toolchain}', 'check',
                 '--no-default-features', '--examples']
         if len(subset) > 0:
-            args.append(f'--features={",".join(subset)}')
+            args.append(f'--features=\"{",".join(subset)}\"')
 
         if target is not None:
             args.append(f'--target={target}')
@@ -34,7 +34,9 @@ async def check(*, toolchain='stable', target=None, features=[], mandatory_featu
         proc = await asyncio.create_subprocess_exec('cargo', *args, stderr=subprocess.PIPE)
         returncode = await proc.wait()
         if returncode != 0:
-            raise Exception(f'`cargo {" ".join(args)}` failed\n{proc.stderr}')
+            err = await proc.stderr.read()
+            raise Exception(
+                f'`cargo {" ".join(args)}` failed\n{err.decode("utf-8")}')
 
 
 features = [
