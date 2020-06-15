@@ -27,7 +27,7 @@ reqwest-default-tls = ["reqwest/default-tls"]
 reqwest-native-tls = ["reqwest/native-tls"]
 reqwest-rustls-tls = ["reqwest/rustls-tls"]
 
-futures-spawn = ["futures-task", "futures-util", "sync"]
+futures-spawn = ["futures-task", "futures-util"]
 wasm-bindgen-spawn = ["wasm-bindgen-futures"]
 tokio-spawn = ["tokio/rt-core", "sync"]
 
