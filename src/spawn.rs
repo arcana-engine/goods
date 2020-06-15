@@ -6,13 +6,24 @@ pub trait Spawn: core::fmt::Debug {
     fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError>;
 }
 
-#[cfg(feature = "futures-spawn")]
+#[cfg(all(feature = "futures-spawn", feature = "sync"))]
 impl<S> Spawn for S
 where
     S: futures_task::Spawn + core::fmt::Debug,
 {
     fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError> {
         <&S as futures_util::task::SpawnExt>::spawn(&self, future).map_err(|_| SpawnError)
+    }
+}
+
+#[cfg(all(feature = "futures-spawn", not(feature = "sync")))]
+impl<S> Spawn for S
+where
+    S: futures_task::LocalSpawn + core::fmt::Debug,
+{
+    fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError> {
+        <&S as futures_util::task::LocalSpawnExt>::spawn_local(&self, future)
+            .map_err(|_| SpawnError)
     }
 }
 
