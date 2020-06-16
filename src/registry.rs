@@ -12,6 +12,15 @@ pub struct RegistryBuilder<K: ?Sized> {
     storages: Vec<Box<dyn Source<K>>>,
 }
 
+impl<K> Default for RegistryBuilder<K>
+where
+    K: ?Sized,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K> RegistryBuilder<K>
 where
     K: ?Sized,
