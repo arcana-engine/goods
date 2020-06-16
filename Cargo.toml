@@ -12,14 +12,14 @@ readme = "README.md"
 
 [features]
 unstable-doc = []
-std = []
+std = ["serde/std", "serde_json/std"]
 fs = ["std"]
 sync = ["spin"]
 fetch = ["js-sys", "web-sys/Response", "web-sys/Window", "wasm-bindgen", "wasm-bindgen-futures"]
 
 json-format = ["serde", "serde_json"]
-yaml-format = ["serde", "serde_yaml"]
-ron-format = ["serde", "ron"]
+yaml-format = ["serde", "serde_yaml", "std"]
+ron-format = ["serde", "ron", "std"]
 
 default = ["std", "sync"]
 
