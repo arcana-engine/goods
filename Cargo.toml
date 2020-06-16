@@ -12,7 +12,7 @@ readme = "README.md"
 
 [features]
 unstable-doc = []
-std = ["serde/std", "serde_json/std"]
+std = []
 fs = ["std"]
 sync = ["spin"]
 fetch = ["js-sys", "web-sys/Response", "web-sys/Window", "wasm-bindgen", "wasm-bindgen-futures"]
