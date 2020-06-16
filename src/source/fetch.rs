@@ -5,8 +5,8 @@ core::compile_error!("`FetchSource` cannot be used with `sync` feature which is 
 use {
     crate::{
         source::{Source, SourceError},
-        sync::{BoxFuture, Ptr},
     },
+    maybe_sync::{BoxFuture, Rc},
     alloc::{boxed::Box, string::String, vec::Vec},
     core::fmt::{self, Display},
     js_sys::{ArrayBuffer, Uint8Array},
@@ -48,9 +48,9 @@ where
                                             let u8array = Uint8Array::new(&array_buffer);
                                             Ok(u8array.to_vec())
                                         }
-                                        Err(err) => Err(SourceError::Error(Ptr::new(JsError(err)))),
+                                        Err(err) => Err(SourceError::Error(Rc::new(JsError(err)))),
                                     },
-                                    Err(err) => Err(SourceError::Error(Ptr::new(JsError(err)))),
+                                    Err(err) => Err(SourceError::Error(Rc::new(JsError(err)))),
                                 }
                             } else {
                                 log::debug!("Asset fetch failed. Status: {}", response.status());

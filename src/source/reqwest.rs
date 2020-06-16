@@ -1,10 +1,10 @@
 use {
     crate::{
         source::{Source, SourceError},
-        sync::{BoxFuture, Ptr},
     },
     alloc::{boxed::Box, vec::Vec},
     reqwest::{Client, IntoUrl, StatusCode},
+    maybe_sync::{BoxFuture, Rc},
 };
 
 /// Asset source that treats asset key as URL and fetches data from it.
@@ -45,7 +45,7 @@ where
                     let bytes = response
                         .bytes()
                         .await
-                        .map_err(|err| SourceError::Error(Ptr::new(err)))?;
+                        .map_err(|err| SourceError::Error(Rc::new(err)))?;
                     Ok(bytes.as_ref().to_vec())
                 }
                 StatusCode::NO_CONTENT | StatusCode::MOVED_PERMANENTLY | StatusCode::NOT_FOUND => {

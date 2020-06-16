@@ -1,10 +1,8 @@
 use {
-    crate::{
-        source::{Source, SourceError},
-        sync::Ptr,
-    },
+    crate::source::{Source, SourceError},
     alloc::{boxed::Box, vec::Vec},
     core::fmt::{self, Debug},
+    maybe_sync::Rc,
 };
 
 /// Builder for source registry.
@@ -55,7 +53,7 @@ where
 /// Collection of registered sources.
 /// Used by `Cache` to load new assets.
 pub struct Registry<K: ?Sized> {
-    storages: Ptr<[Box<dyn Source<K>>]>,
+    storages: Rc<[Box<dyn Source<K>>]>,
 }
 
 impl<K> Clone for Registry<K>
