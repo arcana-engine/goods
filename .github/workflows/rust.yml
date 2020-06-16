@@ -16,6 +16,27 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
         rust-toolchain: [stable, nightly]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install nightly toolchain with clippy available
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ matrix.rust-toolchain }}
+        override: true
+
+    - name: Run cargo test
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --all
+
+  cross:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust-toolchain: [stable, nightly]
         target:
         - i686-pc-windows-gnu
         - i686-pc-windows-msvc
@@ -39,12 +60,6 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: check
-        args: --all
-
-    - name: Run cargo test
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
         args: --all
 
   lints:
