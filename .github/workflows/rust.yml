@@ -69,26 +69,3 @@ jobs:
       with:
         command: clippy
         args: -- -D warnings
-
-  features:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        rust-toolchain: [stable, nightly]
-        target:
-        - i686-unknown-linux-gnu
-        - wasm32-unknown-unknown
-    steps:
-    - uses: actions/checkout@v2
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: ${{ matrix.rust-toolchain }}
-        target: ${{ matrix.target }}
-        override: true
-    - uses: actions/setup-python@v2
-      with:
-        python-version: '3.8.*'
-        architecture: 'x64'
-    - name: Check all permutations
-      run: python check.py ${{ matrix.target }}
