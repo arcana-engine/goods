@@ -19,11 +19,9 @@ def powerset(input):
     return subset + with_pivot
 
 
-async def run_check(*, toolchain, target=None, features=[]):
-    args = [f'+{toolchain}', 'check',
-            '--no-default-features', '--examples']
-    if target is not None:
-        args.append(f'--target={target}')
+async def run_check(*, target, features=[]):
+    args = ['check', f'--target={target}', '--no-default-features',
+            '--all']
     if len(features) > 0:
         args.append(f'--features={",".join(features)}')
 
@@ -37,7 +35,7 @@ async def run_check(*, toolchain, target=None, features=[]):
         print(f'`cargo {" ".join(args)}` succeeded')
 
 
-async def run():
+async def run(target):
     _permutate_features = [
         "std",
     ]
@@ -51,43 +49,35 @@ async def run():
     ]
 
     checks = []
+    if target == "wasm32-unknown-unknown":
+        permutate_features = _permutate_features
+        iterate_features = _iterate_features + \
+            ["fetch", "wasm-bindgen-spawn"]
+    else:
+        permutate_features = _permutate_features + ["sync"]
+        iterate_features = _iterate_features + ["reqwest-default-tls",
+                                                "reqwest-native-tls",
+                                                "reqwest-rustls-tls",
+                                                "tokio-spawn"]
 
-    for target in [None, "wasm32-unknown-unknown"]:
-        if target == "wasm32-unknown-unknown":
-            permutate_features = _permutate_features
-            iterate_features = _iterate_features + \
-                ["fetch", "wasm-bindgen-spawn"]
-        else:
-            permutate_features = _permutate_features + ["sync"]
-            iterate_features = _iterate_features + ["reqwest-default-tls",
-                                                    "reqwest-native-tls",
-                                                    "reqwest-rustls-tls",
-                                                    "tokio-spawn"]
-
-        toolchains = [
-            "stable",
-            "nightly",
-        ]
-
-        for toolchain in toolchains:
-            for feature in iterate_features:
-                for subset in powerset(permutate_features):
-                    checks.append(run_check(features=subset + [feature],
-                                            toolchain=toolchain,
-                                            target=target))
+    for feature in iterate_features:
+        for subset in powerset(permutate_features):
+            checks.append(run_check(features=subset + [feature],
+                                    target=target))
 
     await asyncio.gather(*checks)
 
 
 def main():
     (major, minor, micro, _, _) = sys.version_info
+    target = sys.argv[1]
     if major >= 3:
         if minor >= 7:
-            asyncio.run(run())
+            asyncio.run(run(target))
             return
         elif minor >= 4:
             loop = asyncio.get_event_loop()
-            loop.run_until_complete(run())
+            loop.run_until_complete(run(target))
             loop.close()
             return
 

@@ -15,20 +15,80 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macOS-latest]
+        rust-toolchain: [stable, nightly]
+        target:
+        - i686-pc-windows-gnu
+        - i686-pc-windows-msvc
+        - i686-unknown-linux-gnu
+        - x86_64-apple-darwin
+        - x86_64-pc-windows-gnu
+        - x86_64-pc-windows-msvc
+        - x86_64-unknown-linux-gnu
+        - wasm32-unknown-unknown
+
     steps:
     - uses: actions/checkout@v2
+    - name: Install nightly toolchain with clippy available
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ matrix.rust-toolchain }}
+        target: ${{ matrix.target }}
+        override: true
+    - name: Run cargo check
+      uses: actions-rs/cargo@v1
+      with:
+        command: check
+        args: --all
+
+    - name: Run cargo test
+      uses: actions-rs/cargo@v1
+      with:
+        command: test
+        args: --all
+
+  lints:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install nightly toolchain with clippy available
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: nightly
+        override: true
+        components: rustfmt, clippy
+    - name: Run cargo fmt
+      uses: actions-rs/cargo@v1
+      with:
+        command: fmt
+        args: --all -- --check
+
+    - name: Run cargo clippy
+      uses: actions-rs/cargo@v1
+      with:
+        command: clippy
+        args: -- -D warnings
+
+  features:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust-toolchain: [stable, nightly]
+        target:
+        - i686-unknown-linux-gnu
+        - wasm32-unknown-unknown
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ matrix.rust-toolchain }}
+        target: ${{ matrix.target }}
+        override: true
     - uses: actions/setup-python@v2
       with:
         python-version: '3.8.*'
         architecture: 'x64'
-    - name: Install stable
-      run: rustup install stable && rustup update stable && rustup +stable target install wasm32-unknown-unknown
-    - name: Install nightly
-      run: rustup install nightly && rustup update nightly && rustup +nightly target install wasm32-unknown-unknown
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
     - name: Check all permutations
-      if: ${{ matrix.os != 'windows-latest' }}
-      run: python check.py
+      run: python check.py ${{ matrix.target }}
