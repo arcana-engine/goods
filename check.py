@@ -19,59 +19,64 @@ def powerset(input):
     return subset + with_pivot
 
 
-async def check(*, toolchain='stable', target=None, features=[], mandatory_features=[]):
-    for subset in powerset(features):
-        subset = set(subset) | set(mandatory_features)
+async def run_check(*, toolchain, target=None, features=[]):
+    args = [f'+{toolchain}', 'check',
+            '--no-default-features', '--examples']
+    if target is not None:
+        args.append(f'--target={target}')
+    if len(features) > 0:
+        args.append(f'--features={",".join(features)}')
 
-        args = [f'+{toolchain}', 'check',
-                '--no-default-features', '--examples']
-        if len(subset) > 0:
-            args.append(f'--features={",".join(subset)}')
-
-        if target is not None:
-            args.append(f'--target={target}')
-
-        proc = await asyncio.create_subprocess_exec('cargo', *args, stderr=subprocess.PIPE)
-        returncode = await proc.wait()
-        if returncode != 0:
-            err = await proc.stderr.read()
-            raise Exception(
-                f'`cargo {" ".join(args)}` failed\n{err.decode("utf-8")}')
-
-
-features = [
-    "std",
-    "fs",
-    "sync",
-    "json-format",
-    "yaml-format",
-    "ron-format",
-    "reqwest-default-tls",
-    "reqwest-native-tls",
-    "reqwest-rustls-tls",
-    "futures-spawn",
-]
-
-wasm_features = [
-    "std",
-    "fetch",
-    "json-format",
-    "yaml-format",
-    "ron-format",
-    "wasm-bindgen-spawn",
-]
+    proc = await asyncio.create_subprocess_exec('cargo', *args, stderr=subprocess.PIPE)
+    returncode = await proc.wait()
+    if returncode != 0:
+        err = await proc.stderr.read()
+        raise Exception(
+            f'`cargo {" ".join(args)}` failed\n{err.decode("utf-8")}')
+    else:
+        print(f'`cargo {" ".join(args)}` succeeded')
 
 
 async def run():
-    await asyncio.gather(
-        check(toolchain="nightly", features=features),
-        check(toolchain="stable", features=features,
-              mandatory_features=['std']),
-        check(toolchain="nightly", target="wasm32-unknown-unknown",
-              features=wasm_features),
-        check(toolchain="stable", target="wasm32-unknown-unknown",
-              features=wasm_features, mandatory_features=['std']),
-    )
+    _permutate_features = [
+        "std",
+    ]
+
+    _iterate_features = [
+        "fs",
+        "json-format",
+        "yaml-format",
+        "ron-format",
+        "futures-spawn",
+    ]
+
+    checks = []
+
+    for target in [None, "wasm32-unknown-unknown"]:
+        if target == "wasm32-unknown-unknown":
+            permutate_features = _permutate_features
+            iterate_features = _iterate_features + \
+                ["fetch", "wasm-bindgen-spawn"]
+        else:
+            permutate_features = _permutate_features + ["sync"]
+            iterate_features = _iterate_features + ["reqwest-default-tls",
+                                                    "reqwest-native-tls",
+                                                    "reqwest-rustls-tls",
+                                                    "tokio-spawn"]
+
+        toolchains = [
+            "stable",
+            "nightly",
+        ]
+
+        for toolchain in toolchains:
+            for feature in iterate_features:
+                for subset in powerset(permutate_features):
+                    checks.append(run_check(features=subset + [feature],
+                                            toolchain=toolchain,
+                                            target=target))
+
+    await asyncio.gather(*checks)
 
 
 def main():
