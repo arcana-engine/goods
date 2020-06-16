@@ -1,5 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
-core::compile_error!("This example can be built only for wasm32 target");
+#![cfg(target_arch = "wasm32")]
 
 use {goods::*, std::collections::HashMap, wasm_bindgen::prelude::*};
 
