@@ -18,11 +18,9 @@ jobs:
     steps:
     - uses: actions/checkout@v2
     - name: Install stable
-      run: rustup install stable && rustup update stable
+      run: rustup install stable && rustup update stable && rustup +stable target install wasm32-unknown-unknown
     - name: Install nightly
-      run: rustup install nightly && rustup update nightly
-    - name: Install wasm
-      run: rustup target install wasm32-unknown-unknown
+      run: rustup install nightly && rustup update nightly && rustup +nightly target install wasm32-unknown-unknown
     - name: Build
       run: cargo build --verbose
     - name: Run tests
