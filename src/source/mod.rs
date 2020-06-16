@@ -17,9 +17,9 @@ mod fetch;
 pub use self::fetch::*;
 
 use {
-    crate::sync::{BoxFuture, Ptr, Send, Sync},
     alloc::vec::Vec,
     core::fmt::{self, Debug, Display},
+    maybe_sync::{dyn_maybe_send_sync, BoxFuture, MaybeSend, MaybeSync, Rc},
 };
 
 /// Error type for [`Source`]s.
@@ -30,20 +30,12 @@ pub enum SourceError {
     NotFound,
 
     /// Custom source error.
-    #[cfg(all(not(feature = "std"), not(feature = "sync")))]
-    Error(Ptr<dyn Display>),
+    #[cfg(not(feature = "std"))]
+    Error(Rc<dyn_maybe_send_sync!(Display)>),
 
     /// Custom source error.
-    #[cfg(all(not(feature = "std"), not(not(feature = "sync"))))]
-    Error(Ptr<dyn Display + Send + Sync>),
-
-    /// Custom source error.
-    #[cfg(all(feature = "std", not(feature = "sync")))]
-    Error(Ptr<dyn std::error::Error>),
-
-    /// Custom source error.
-    #[cfg(all(feature = "std", feature = "sync"))]
-    Error(Ptr<dyn std::error::Error + Send + Sync>),
+    #[cfg(feature = "std")]
+    Error(Rc<dyn_maybe_send_sync!(std::error::Error)>),
 }
 
 impl Debug for SourceError {
@@ -75,7 +67,7 @@ impl std::error::Error for SourceError {
 }
 
 /// Asset data source.
-pub trait Source<K: ?Sized>: core::fmt::Debug + Send + Sync + 'static {
+pub trait Source<K: ?Sized>: core::fmt::Debug + MaybeSend + MaybeSync + 'static {
     /// Reads asset asynchronously.
     /// Returns async bytes on success.
     /// Otherwise returns error `E` describing occurred problem.

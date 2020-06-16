@@ -2,14 +2,14 @@ use {
     crate::{
         asset::Asset,
         channel::{Receiver, Sender, Setter},
-        sync::{Lock, Send},
     },
     alloc::{boxed::Box, vec::Vec},
     core::any::{Any, TypeId},
     hashbrown::hash_map::{Entry, HashMap},
+    maybe_sync::{dyn_maybe_send, MaybeSend, Mutex},
 };
 
-pub(crate) trait AnyProcess<C>: Send {
+pub(crate) trait AnyProcess<C>: MaybeSend {
     fn run(self: Box<Self>, ctx: &mut C);
 }
 
@@ -32,17 +32,13 @@ struct Processes<C> {
 }
 
 pub(crate) struct Processor {
-    #[cfg(not(feature = "sync"))]
-    processes: Lock<HashMap<TypeId, Box<dyn Any>>>,
-
-    #[cfg(feature = "sync")]
-    processes: Lock<HashMap<TypeId, Box<dyn Any + Send>>>,
+    processes: Mutex<HashMap<TypeId, Box<dyn_maybe_send!(Any)>>>,
 }
 
 impl Processor {
     pub(crate) fn new() -> Self {
         Processor {
-            processes: Lock::new(HashMap::new()),
+            processes: Mutex::new(HashMap::new()),
         }
     }
 

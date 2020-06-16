@@ -1,5 +1,4 @@
 use {
-    crate::sync::{Lock, Ptr},
     alloc::vec::Vec,
     core::{
         future::Future,
@@ -7,16 +6,17 @@ use {
         pin::Pin,
         task::{Context, Poll, Waker},
     },
+    maybe_sync::{Mutex, Rc},
 };
 
 /// Reciver for spin-lock based channel.
 pub(crate) struct Receiver<T> {
-    inner: Ptr<Lock<Queue<T>>>,
+    inner: Rc<Mutex<Queue<T>>>,
 }
 
 impl<T> Receiver<T> {
     pub(crate) fn new() -> Self {
-        let inner = Ptr::new(Lock::new(Queue {
+        let inner = Rc::new(Mutex::new(Queue {
             array: Vec::new(),
             wakers: Vec::new(),
         }));
@@ -37,7 +37,7 @@ impl<T> Receiver<T> {
 
 /// Sender for spin-lock based channel.
 pub(crate) struct Sender<T> {
-    inner: Ptr<Lock<Queue<T>>>,
+    inner: Rc<Mutex<Queue<T>>>,
 }
 
 impl<T> Sender<T> {
@@ -57,7 +57,7 @@ struct Queue<T> {
 
 /// Spin-lock based shareable slot.
 pub(crate) struct Slot<T> {
-    inner: Ptr<Lock<SlotInner<T>>>,
+    inner: Rc<Mutex<SlotInner<T>>>,
 }
 
 impl<T> Slot<T> {
@@ -89,7 +89,7 @@ impl<T> Future for Slot<T> {
 
 /// Setter for spin-lock based channel.
 pub(crate) struct Setter<T> {
-    inner: Ptr<Lock<SlotInner<T>>>,
+    inner: Rc<Mutex<SlotInner<T>>>,
 }
 
 impl<T> Setter<T> {
@@ -109,7 +109,7 @@ struct SlotInner<T> {
 }
 
 pub(crate) fn slot<T>() -> (Slot<T>, Setter<T>) {
-    let inner = Ptr::new(Lock::new(SlotInner {
+    let inner = Rc::new(Mutex::new(SlotInner {
         value: None,
         waker: None,
     }));

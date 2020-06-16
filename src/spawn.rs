@@ -1,4 +1,4 @@
-use crate::sync::BoxFuture;
+use maybe_sync::BoxFuture;
 
 pub struct SpawnError;
 

@@ -1,10 +1,8 @@
 use {
-    crate::{
-        sync::{Send, Sync},
-        Cache, Ready,
-    },
+    crate::{Cache, Ready},
     alloc::vec::Vec,
     core::{convert::Infallible, future::Future},
+    maybe_sync::{MaybeSend, MaybeSync},
 };
 
 #[cfg(feature = "std")]
@@ -18,14 +16,14 @@ use core::fmt::Display;
 /// that are produced by `Format` implemetations.
 ///
 /// [`Format`]: ./trait.Format.html
-pub trait Asset: Send + Sync + Sized + Clone + 'static {
+pub trait Asset: MaybeSend + MaybeSync + Sized + Clone + 'static {
     /// Error that may occur during asset building.
     #[cfg(feature = "std")]
-    type Error: Error + Send + Sync;
+    type Error: Error + MaybeSend + MaybeSync;
 
     /// Error that may occur during asset building.
     #[cfg(not(feature = "std"))]
-    type Error: Display + Send + Sync;
+    type Error: Display + MaybeSend + MaybeSync;
 
     /// Asset processing context.
     /// Instance of context is required to convert asset intermediate representation into asset instance.
@@ -39,10 +37,10 @@ pub trait Asset: Send + Sync + Sized + Clone + 'static {
     /// This representation is constructed by [`Format::decode`].
     ///
     /// [`Format::decode`]: ./trait.Format.html#tymethod.decode
-    type Repr: Send;
+    type Repr: MaybeSend;
 
     /// Asynchronous result produced by asset building.
-    type BuildFuture: Future<Output = Result<Self, Self::Error>> + Send + 'static;
+    type BuildFuture: Future<Output = Result<Self, Self::Error>> + MaybeSend + 'static;
 
     /// Build asset instance from intermediate representation using provided context.
     fn build(repr: Self::Repr, ctx: &mut Self::Context) -> Self::BuildFuture;
@@ -53,17 +51,17 @@ pub trait Asset: Send + Sync + Sized + Clone + 'static {
 /// and [`Cache`] to load compound assets.
 ///
 /// [`Cache`]: ./struct.Cache.html
-pub trait Format<A: Asset, K>: Send + 'static {
+pub trait Format<A: Asset, K>: MaybeSend + 'static {
     /// Error that may occur during asset loading.
     #[cfg(feature = "std")]
-    type Error: Error + Send + Sync + 'static;
+    type Error: Error + MaybeSend + MaybeSync + 'static;
 
     /// Error that may occur during asset loading.
     #[cfg(not(feature = "std"))]
-    type Error: Display + Send + Sync + 'static;
+    type Error: Display + MaybeSend + MaybeSync + 'static;
 
     /// Asynchronous result produced by the format loading.
-    type DecodeFuture: Future<Output = Result<A::Repr, Self::Error>> + Send + 'static;
+    type DecodeFuture: Future<Output = Result<A::Repr, Self::Error>> + MaybeSend + 'static;
 
     /// Decode asset intermediate representation from raw data using cache to fetch sub-assets.
     fn decode(self, bytes: Vec<u8>, cache: &Cache<K>) -> Self::DecodeFuture;
@@ -84,14 +82,14 @@ pub trait AssetDefaultFormat<K>: Asset {
 /// Shortcut for implementing [`Asset`] when asset building is synchronous.
 ///
 /// [`Asset`]: ./trait.Asset.html
-pub trait SyncAsset: Send + Sync + Sized + Clone + 'static {
+pub trait SyncAsset: MaybeSend + MaybeSync + Sized + Clone + 'static {
     /// Error that may occur during asset building.
     #[cfg(feature = "std")]
-    type Error: Error + Send + Sync;
+    type Error: Error + MaybeSend + MaybeSync;
 
     /// Error that may occur during asset building.
     #[cfg(not(feature = "std"))]
-    type Error: Display + Send + Sync;
+    type Error: Display + MaybeSend + MaybeSync;
 
     /// Asset processing context.
     /// Instance of context is required to convert asset intermediate representation into asset instance.
@@ -101,7 +99,7 @@ pub trait SyncAsset: Send + Sync + Sized + Clone + 'static {
     /// This representation is constructed by [`Format::decode`].
     ///
     /// [`Format::decode`]: /trait.Format.html#tymethod.decode
-    type Repr: Send;
+    type Repr: MaybeSend;
 
     /// Build asset instance from intermediate representation using provided context.
     fn build(repr: Self::Repr, ctx: &mut Self::Context) -> Result<Self, Self::Error>;
@@ -134,7 +132,7 @@ pub struct PhantomContext;
 ///
 /// [`Asset`]: ./trait.Asset.html
 /// [`Format`]: ./trait.Format.html
-pub trait SimpleAsset: Send + Sync + Sized + Clone + 'static {}
+pub trait SimpleAsset: MaybeSend + MaybeSync + Sized + Clone + 'static {}
 
 impl<S> SyncAsset for S
 where

@@ -44,7 +44,7 @@
 //!
 //! * `std` - adds implementation of [`std::error::Error`] trait for error types.
 //!   Enabled by default.
-//! * `sync` - makes most types [`Send`] and some [`Sync`]. Adds requirements for traits implementations to be [`Send`] and [`Sync`] where needed.
+//! * `sync` - makes most types [`MaybeSend`] and some [`MaybeSync`]. Adds requirements for traits implementations to be [`MaybeSend`] and [`MaybeSync`] where needed.
 //!   Enabled by default.
 //!
 //! ## Sources
@@ -70,8 +70,8 @@
 //! [`HttpSource`]: ./struct.HttpSource.html
 //! [`serde::de::DeserializeOwned`]: https://docs.rs/serde/1/serde/de/trait.DeserializeOwned.html
 //! [`std::error::Error`]: https://doc.rust-lang.org/std/error/trait.Error.html
-//! [`Send`]: https://doc.rust-lang.org/std/marker/trait.Send.html
-//! [`Sync`]: https://doc.rust-lang.org/std/marker/trait.Sync.html
+//! [`MaybeSend`]: https://doc.rust-lang.org/std/marker/trait.MaybeSend.html
+//! [`MaybeSync`]: https://doc.rust-lang.org/std/marker/trait.MaybeSync.html
 //! [`FileSource`]: ./struct.FileSource.html
 //! [`Source`]: ./trait.Source.html
 //! [`Source::read`]: ./trait.Source.html#tymethod.read
@@ -104,7 +104,6 @@ mod process;
 mod registry;
 mod source;
 mod spawn;
-mod sync;
 
 pub use self::{asset::*, formats::*, handle::*, registry::*, registry::*, source::*, spawn::*};
 
@@ -112,7 +111,6 @@ use {
     crate::{
         channel::{slot, Sender},
         process::{AnyProcess, Process, Processor},
-        sync::{BoxFuture, Lock, Ptr, Send, Sync},
     },
     alloc::{boxed::Box, vec::Vec},
     core::{
@@ -124,13 +122,8 @@ use {
         task::{Context, Poll},
     },
     hashbrown::hash_map::{Entry, HashMap},
+    maybe_sync::{dyn_maybe_send_sync, BoxFuture, MaybeSend, MaybeSync, Mutex, Rc},
 };
-
-#[cfg(not(feature = "sync"))]
-use alloc::rc::Rc;
-
-#[cfg(feature = "sync")]
-use alloc::sync::Arc;
 
 /// Immediatelly ready future.
 /// Can be used for [`Format::DecodeFuture`]
@@ -169,64 +162,30 @@ pub enum Error<A: Asset> {
     /// Specifically this error may occur in [`Asset::build`].
     ///
     /// [`Asset::build`]: ./trait.Asset.html#tymethod.build
-    #[cfg(not(feature = "sync"))]
     Asset(Rc<A::Error>),
 
-    /// Asset instance building failed.
+    /// Asset decoding failed.
     ///
-    /// Specifically this error may occur in [`Asset::build`].
+    /// Specifically this error may occur in [`Format::decode`].
     ///
-    /// [`Asset::build`]: ./trait.Asset.html#tymethod.build
-    #[cfg(feature = "sync")]
-    Asset(Arc<A::Error>),
+    /// [`Format::decode`]: ./trait.Format.html#tymethod.decode
+    #[cfg(not(feature = "std"))]
+    Format(Rc<dyn_maybe_send_sync!(Display)>),
 
     /// Asset decoding failed.
     ///
     /// Specifically this error may occur in [`Format::decode`].
     ///
     /// [`Format::decode`]: ./trait.Format.html#tymethod.decode
-    #[cfg(all(not(feature = "std"), not(feature = "sync")))]
-    Format(Rc<dyn Display>),
-
-    /// Asset decoding failed.
-    ///
-    /// Specifically this error may occur in [`Format::decode`].
-    ///
-    /// [`Format::decode`]: ./trait.Format.html#tymethod.decode
-    #[cfg(all(not(feature = "std"), feature = "sync"))]
-    Format(Arc<dyn Display + Send + Sync>),
-
-    /// Asset decoding failed.
-    ///
-    /// Specifically this error may occur in [`Format::decode`].
-    ///
-    /// [`Format::decode`]: ./trait.Format.html#tymethod.decode
-    #[cfg(all(feature = "std", not(feature = "sync")))]
-    Format(Rc<dyn std::error::Error>),
-
-    /// Asset decoding failed.
-    ///
-    /// Specifically this error may occur in [`Format::decode`].
-    ///
-    /// [`Format::decode`]: ./trait.Format.html#tymethod.decode
-    #[cfg(all(feature = "std", feature = "sync"))]
-    Format(Arc<dyn std::error::Error + Send + Sync>),
+    #[cfg(feature = "std")]
+    Format(Rc<dyn_maybe_send_sync!(std::error::Error)>),
+    /// Source in which asset was found failed to load it.
+    #[cfg(not(feature = "std"))]
+    Source(Rc<dyn_maybe_send_sync!(Display)>),
 
     /// Source in which asset was found failed to load it.
-    #[cfg(all(not(feature = "std"), not(feature = "sync")))]
-    Source(Rc<dyn Display>),
-
-    /// Source in which asset was found failed to load it.
-    #[cfg(all(not(feature = "std"), feature = "sync"))]
-    Source(Arc<dyn Display + Send + Sync>),
-
-    /// Source in which asset was found failed to load it.
-    #[cfg(all(feature = "std", not(feature = "sync")))]
-    Source(Rc<dyn std::error::Error>),
-
-    /// Source in which asset was found failed to load it.
-    #[cfg(all(feature = "std", feature = "sync"))]
-    Source(Arc<dyn std::error::Error + Send + Sync>),
+    #[cfg(feature = "std")]
+    Source(Rc<dyn_maybe_send_sync!(std::error::Error)>),
 }
 
 impl<A> From<SourceError> for Error<A>
@@ -302,9 +261,9 @@ where
     }
 }
 
-pub trait Key: Eq + Hash + Clone + Send + Sync + 'static {}
+pub trait Key: Eq + Hash + Clone + MaybeSend + MaybeSync + 'static {}
 
-impl<T> Key for T where T: Eq + Hash + Clone + Send + Sync + 'static {}
+impl<T> Key for T where T: Eq + Hash + Clone + MaybeSend + MaybeSync + 'static {}
 
 /// Asset cache.
 /// This type is main entry point for asset loading.
@@ -312,14 +271,14 @@ impl<T> Key for T where T: Eq + Hash + Clone + Send + Sync + 'static {}
 pub struct Cache<K> {
     registry: Registry<K>,
     #[cfg(not(feature = "sync"))]
-    inner: Ptr<Inner<K, dyn Spawn>>,
+    inner: Rc<Inner<K, dyn Spawn>>,
 
     #[cfg(feature = "sync")]
-    inner: Ptr<Inner<K, dyn Spawn + Send + Sync>>,
+    inner: Rc<Inner<K, dyn Spawn + MaybeSend + MaybeSync>>,
 }
 
 struct Inner<K, S: ?Sized> {
-    cache: Lock<HashMap<(TypeId, K), AnyHandle>>,
+    cache: Mutex<HashMap<(TypeId, K), AnyHandle>>,
     processor: Processor,
     spawn: S,
 }
@@ -348,12 +307,12 @@ impl<K> Cache<K> {
     /// Loading tasks will be sent to `Loader`.
     pub fn new<S>(registry: Registry<K>, spawn: S) -> Self
     where
-        S: Spawn + Send + Sync + 'static,
+        S: Spawn + MaybeSend + MaybeSync + 'static,
     {
         Cache {
             registry,
-            inner: Ptr::new(Inner {
-                cache: Lock::default(),
+            inner: Rc::new(Inner {
+                cache: Mutex::default(),
                 processor: Processor::new(),
                 spawn,
             }),
@@ -434,9 +393,9 @@ impl<K> Cache<K> {
 
 #[cfg(feature = "sync")]
 #[allow(dead_code)]
-fn test_loader_send_sync<K: Send>() {
-    fn is_send<T: Send>() {}
-    fn is_sync<T: Sync>() {}
+fn test_loader_send_sync<K: MaybeSend>() {
+    fn is_send<T: MaybeSend>() {}
+    fn is_sync<T: MaybeSync>() {}
 
     is_send::<Cache<K>>();
     is_sync::<Cache<K>>();
@@ -451,17 +410,17 @@ pub(crate) async fn load_asset<A, F, K, L>(
 ) where
     A: Asset,
     F: Format<A, K>,
-    L: Future<Output = Result<Vec<u8>, SourceError>> + Send + 'static,
+    L: Future<Output = Result<Vec<u8>, SourceError>> + MaybeSend + 'static,
 {
     handle.set(
         async move {
             let bytes = loading.await?;
             let decode = format.decode(bytes, &cache);
             drop(cache);
-            let repr = decode.await.map_err(|err| Error::Format(Ptr::new(err)))?;
+            let repr = decode.await.map_err(|err| Error::Format(Rc::new(err)))?;
             let (slot, setter) = slot::<A::BuildFuture>();
             process_sender.send(Box::new(Process::<A> { repr, setter }));
-            slot.await.await.map_err(|err| Error::Asset(Ptr::new(err)))
+            slot.await.await.map_err(|err| Error::Asset(Rc::new(err)))
         }
         .await,
     )
@@ -475,7 +434,7 @@ pub(crate) async fn load_asset_with_phantom_context<A, F, K, L>(
 ) where
     A: Asset,
     F: Format<A, K>,
-    L: Future<Output = Result<Vec<u8>, SourceError>> + Send + 'static,
+    L: Future<Output = Result<Vec<u8>, SourceError>> + MaybeSend + 'static,
 {
     debug_assert_eq!(TypeId::of::<A::Context>(), TypeId::of::<PhantomContext>());
 
@@ -484,11 +443,11 @@ pub(crate) async fn load_asset_with_phantom_context<A, F, K, L>(
             let bytes = loading.await?;
             let decode = format.decode(bytes, &cache);
             drop(cache);
-            let repr = decode.await.map_err(|err| Error::Format(Ptr::new(err)))?;
+            let repr = decode.await.map_err(|err| Error::Format(Rc::new(err)))?;
             let build = A::build(repr, unsafe {
                 &mut *{ &mut PhantomContext as *mut _ as *mut A::Context }
             });
-            build.await.map_err(|err| Error::Asset(Ptr::new(err)))
+            build.await.map_err(|err| Error::Asset(Rc::new(err)))
         }
         .await,
     )

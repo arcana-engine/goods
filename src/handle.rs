@@ -1,9 +1,5 @@
 use {
-    crate::{
-        asset::Asset,
-        sync::{Lock, Ptr},
-        Error,
-    },
+    crate::{asset::Asset, Error},
     alloc::vec::Vec,
     core::{
         any::Any,
@@ -16,6 +12,7 @@ use {
         sync::atomic::{AtomicBool, Ordering},
         task::{Context, Poll, Waker},
     },
+    maybe_sync::{Mutex, Rc},
 };
 
 /// Handle for an asset of type `A` that eventually
@@ -28,7 +25,7 @@ use {
 /// When asset is finally loaded any task that polled `Handle` will be notified.
 #[derive(Clone)]
 pub struct Handle<A: Asset> {
-    state: Ptr<State<A>>,
+    state: Rc<State<A>>,
 }
 
 impl<A> Eq for Handle<A> where A: Asset {}
@@ -55,7 +52,7 @@ where
 }
 
 struct State<A: Asset> {
-    wakers: Lock<Vec<Waker>>,
+    wakers: Mutex<Vec<Waker>>,
     storage: UnsafeCell<MaybeUninit<Result<A, Error<A>>>>,
     set: AtomicBool,
 }
@@ -112,8 +109,8 @@ where
 {
     pub(crate) fn new() -> Self {
         Handle {
-            state: Ptr::new(State {
-                wakers: Lock::default(),
+            state: Rc::new(State {
+                wakers: Mutex::default(),
                 storage: UnsafeCell::new(MaybeUninit::uninit()),
                 set: AtomicBool::new(false),
             }),
@@ -179,10 +176,10 @@ where
 #[derive(Clone)]
 pub(crate) struct AnyHandle {
     #[cfg(not(feature = "sync"))]
-    state: Ptr<dyn Any>,
+    state: Rc<dyn Any>,
 
     #[cfg(feature = "sync")]
-    state: Ptr<dyn Any + Send + Sync>,
+    state: Rc<dyn Any + Send + Sync>,
 }
 
 impl<A> From<Handle<A>> for AnyHandle
@@ -199,7 +196,7 @@ where
 impl AnyHandle {
     pub fn downcast<A: Asset>(self) -> Option<Handle<A>> {
         Some(Handle {
-            state: Ptr::downcast(self.state).ok()?,
+            state: Rc::downcast(self.state).ok()?,
         })
     }
 }
