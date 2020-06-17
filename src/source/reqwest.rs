@@ -1,10 +1,8 @@
 use {
-    crate::{
-        source::{Source, SourceError},
-    },
+    crate::source::{Source, SourceError},
     alloc::{boxed::Box, vec::Vec},
-    reqwest::{Client, IntoUrl, StatusCode},
     maybe_sync::{BoxFuture, Rc},
+    reqwest::{Client, IntoUrl, StatusCode},
 };
 
 /// Asset source that treats asset key as URL and fetches data from it.
