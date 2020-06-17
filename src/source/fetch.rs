@@ -3,13 +3,11 @@ core::compile_error!("`FetchSource` cannot be used with `sync` feature which is 
 
 #[cfg(not(feature = "sync"))]
 use {
-    crate::{
-        source::{Source, SourceError},
-    },
-    maybe_sync::{BoxFuture, Rc},
+    crate::source::{Source, SourceError},
     alloc::{boxed::Box, string::String, vec::Vec},
     core::fmt::{self, Display},
     js_sys::{ArrayBuffer, Uint8Array},
+    maybe_sync::{BoxFuture, Rc},
     wasm_bindgen::JsValue,
     wasm_bindgen_futures::JsFuture,
     web_sys::Response,
