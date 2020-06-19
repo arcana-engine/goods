@@ -30,7 +30,7 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --all
+        args: --all --all-features
 
   cross:
     runs-on: ubuntu-latest
@@ -57,10 +57,17 @@ jobs:
         target: ${{ matrix.target }}
         override: true
     - name: Run cargo check
+      if: ${{ target != 'wasm32-unknown-unknown' }}
       uses: actions-rs/cargo@v1
       with:
         command: check
-        args: --all
+        args: --all --all-features
+    - name: Run cargo check
+      if: ${{ target == 'wasm32-unknown-unknown' }}
+      uses: actions-rs/cargo@v1
+      with:
+        command: check
+        args: --all --no-default-features --features=std,fetch,json-format,yaml-format,ron-format,wasm-bindgen-spawn
 
   lints:
     runs-on: ubuntu-latest
@@ -77,10 +84,10 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: fmt
-        args: --all -- --check
+        args: -- --check
 
     - name: Run cargo clippy
       uses: actions-rs/cargo@v1
       with:
         command: clippy
-        args: -- -D warnings
+        args: --all-features -- -D warnings

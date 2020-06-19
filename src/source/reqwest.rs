@@ -8,16 +8,14 @@ use {
 /// Asset source that treats asset key as URL and fetches data from it.
 /// Based on `reqwest` crate.
 #[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "reqwest")))]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ReqwestSource {
     client: Client,
 }
 
 impl ReqwestSource {
     pub fn new() -> Self {
-        ReqwestSource {
-            client: Client::new(),
-        }
+        ReqwestSource::default()
     }
 
     pub fn with_client(client: Client) -> Self {
