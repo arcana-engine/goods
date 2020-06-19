@@ -1,8 +1,6 @@
 use {
-    crate::{
-        source::{Source, SourceError},
-        sync::{BoxFuture, Ptr},
-    },
+    crate::source::{Source, SourceError},
+    maybe_sync::{BoxFuture, Rc},
     std::path::{Path, PathBuf},
 };
 
@@ -31,7 +29,7 @@ where
         let result = match std::fs::read(path) {
             Ok(bytes) => Ok(bytes),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(SourceError::NotFound),
-            Err(err) => Err(SourceError::Error(Ptr::new(err))),
+            Err(err) => Err(SourceError::Error(Rc::new(err))),
         };
 
         Box::pin(async move { result })
