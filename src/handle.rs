@@ -151,7 +151,7 @@ where
     pub fn is_ok(&self) -> bool {
         match self.query() {
             Poll::Pending => false,
-            Poll::Ready(result) => result.is_err(),
+            Poll::Ready(result) => result.is_ok(),
         }
     }
 
