@@ -92,6 +92,9 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(all(doc, feature = "unstable-doc"), feature(doc_cfg))]
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/zakarumych/goods/master/logo/goods.logo.png"
+)]
 
 extern crate alloc;
 

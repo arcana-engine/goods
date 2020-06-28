@@ -1,3 +1,6 @@
+
+<img src="logo/goods.logo.svg" width="200" />
+
 # goods
 
 Easy-to-use asset manager for many environments.
@@ -6,7 +9,6 @@ Easy-to-use asset manager for many environments.
 [![docs](https://docs.rs/goods/badge.svg)](https://docs.rs/goods)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
 [![License](https://img.shields.io/badge/license-APACHE-blue.svg)](LICENSE-APACHE)
-
 
 Easy-to-use asset manager for many environments.
 
