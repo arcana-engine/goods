@@ -118,13 +118,14 @@ use {
     alloc::{boxed::Box, vec::Vec},
     core::{
         any::TypeId,
+        borrow::Borrow,
         fmt::{self, Debug, Display},
         future::Future,
-        hash::Hash,
+        hash::{BuildHasher, Hash, Hasher},
         pin::Pin,
         task::{Context, Poll},
     },
-    hashbrown::hash_map::{Entry, HashMap},
+    hashbrown::hash_map::{Entry, HashMap, RawEntryMut},
     maybe_sync::{dyn_maybe_send_sync, BoxFuture, MaybeSend, MaybeSync, Mutex, Rc},
 };
 
@@ -148,7 +149,7 @@ impl<T> Future for Ready<T> {
 }
 
 /// Creates immediately ready future.
-pub fn ready<T>(value: T) -> Ready<T> {
+pub const fn ready<T>(value: T) -> Ready<T> {
     Ready(Some(value))
 }
 
@@ -182,6 +183,7 @@ pub enum Error<A: Asset> {
     /// [`Format::decode`]: ./trait.Format.html#tymethod.decode
     #[cfg(feature = "std")]
     Format(Rc<dyn_maybe_send_sync!(std::error::Error)>),
+
     /// Source in which asset was found failed to load it.
     #[cfg(not(feature = "std"))]
     Source(Rc<dyn_maybe_send_sync!(Display)>),
@@ -273,11 +275,7 @@ impl<T> Key for T where T: Eq + Hash + Clone + MaybeSend + MaybeSync + 'static {
 /// Caches loaded assets and provokes loading work for new assets.
 pub struct Cache<K> {
     registry: Registry<K>,
-    #[cfg(not(feature = "sync"))]
-    inner: Rc<Inner<K, dyn Spawn>>,
-
-    #[cfg(feature = "sync")]
-    inner: Rc<Inner<K, dyn Spawn + MaybeSend + MaybeSync>>,
+    inner: Rc<Inner<K, dyn_maybe_send_sync!(Spawn)>>,
 }
 
 struct Inner<K, S: ?Sized> {
@@ -381,6 +379,40 @@ impl<K> Cache<K> {
 
                 handle
             }
+        }
+    }
+
+    /// Removes asset cache with specified key if exists.
+    /// Subsequent loads with that key will result in loading process started anew
+    /// even if previously assets are still alive.
+    /// Returns if asset cache was removed.
+    pub fn remove<A, Q>(&self, key: &Q) -> bool
+    where
+        A: 'static,
+        K: Key + Borrow<Q>,
+        Q: Hash + Eq,
+    {
+        let mut lock = self.inner.cache.lock();
+
+        // Raw entry API is used because it is impossible to construct type
+        // borrowable from (TypeId, K) using `&Q`.
+        let mut hasher = lock.hasher().build_hasher();
+
+        // For equivalent Q and K their hashes must be the same.
+        // This is identical to `HashMap::remove` requirement.
+        (TypeId::of::<A>(), key).hash(&mut hasher);
+        let hash = hasher.finish();
+
+        let entry = lock.raw_entry_mut().from_hash(hash, |(tid, k)| {
+            *tid == TypeId::of::<A>() && k.borrow() == key
+        });
+
+        match entry {
+            RawEntryMut::Occupied(entry) => {
+                entry.remove();
+                true
+            }
+            _ => false,
         }
     }
 
