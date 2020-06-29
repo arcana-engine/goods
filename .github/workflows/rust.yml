@@ -57,13 +57,13 @@ jobs:
         target: ${{ matrix.target }}
         override: true
     - name: Run cargo check
-      if: ${{ target != 'wasm32-unknown-unknown' }}
+      if: ${{ matrix.target != 'wasm32-unknown-unknown' }}
       uses: actions-rs/cargo@v1
       with:
         command: check
         args: --all --all-features
     - name: Run cargo check
-      if: ${{ target == 'wasm32-unknown-unknown' }}
+      if: ${{ matrix.target == 'wasm32-unknown-unknown' }}
       uses: actions-rs/cargo@v1
       with:
         command: check
