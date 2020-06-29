@@ -87,9 +87,6 @@ Shows how to build registry with [`FileSource`] and load simple assets from it.
 ### [reqwest example](./examples/reqwest.rs)
 Async example that loads assets using HTTP protocol with [`tokio`] and [`reqwest`] crates.
 
-### [legion example](./examples/legion.rs)
-Shows how to load assets directly into entity using [`legion`] ECS crate.
-
 ### [fetch example](./examples/fetch.rs)
 Shows how to load assets in browser using Fetch API.
 
@@ -136,7 +133,6 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 [`FetchSource`]: https://docs.rs/goods/latest/wasm32-unknown-unknown/goods/struct.FetchSource.html
 [`tokio`]: https://docs.rs/tokio
 [`reqwest`]: https://docs.rs/reqwest
-[`legion`]: https://docs.rs/legion
 [`Format`]: https://docs.rs/goods/latest/goods/trait.Format.html
 [`JsonFormat`]: https://docs.rs/goods/latest/goods/struct.JsonFormat.html
 [`YamlFormat`]: https://docs.rs/goods/latest/goods/struct.YamlFormat.html

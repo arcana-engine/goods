@@ -64,7 +64,6 @@ thiserror = "1.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 env_logger = "0.7"
 tokio = { version = "0.2", features = ["rt-core", "macros"] }
-legion = "0.2"
 futures-executor = { version = "0.3", features = ["thread-pool"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
@@ -78,10 +77,6 @@ required-features = ["fs", "json-format", "yaml-format", "futures-spawn"]
 [[example]]
 name = "reqwest"
 required-features = ["reqwest", "json-format", "yaml-format", "tokio-spawn", "reqwest-default-tls"]
-
-[[example]]
-name = "legion"
-required-features = ["fs", "ron-format", "futures-spawn"]
 
 [[example]]
 name = "fetch"
