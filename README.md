@@ -7,6 +7,7 @@ Easy-to-use asset manager for many environments.
 
 [![crates](https://img.shields.io/crates/v/goods.svg?label=goods)](https://crates.io/crates/goods)
 [![docs](https://docs.rs/goods/badge.svg)](https://docs.rs/goods)
+[![Actions](https://github.com/zakarumych/goods/workflows/Rust/badge.svg)](https://github.com/zakarumych/goods/actions?query=workflow%3ARust)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
 [![License](https://img.shields.io/badge/license-APACHE-blue.svg)](LICENSE-APACHE)
 
