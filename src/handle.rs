@@ -82,7 +82,9 @@ where
 
         if state.set.load(Ordering::Acquire) {
             Poll::Ready(Result::clone(unsafe {
-                &*(state.storage.get() as *mut Result<A, Error<A>>)
+                // check above guaranties that storage was initialzied
+                // and will never accessed mutably until `State` is dropped.
+                &*(state.storage.get() as *const Result<A, Error<A>>)
             }))
         } else {
             let waker = context.waker();
@@ -95,7 +97,14 @@ where
 
             // Try again.
             if state.set.load(Ordering::Acquire) {
-                Poll::Ready(unsafe { &*(state.storage.get() as *mut Result<A, Error<A>>) }.clone())
+                Poll::Ready(
+                    unsafe {
+                        // check above guaranties that storage was initialzied
+                        // and will never accessed mutably until `State` is dropped.
+                        &*(state.storage.get() as *const Result<A, Error<A>>)
+                    }
+                    .clone(),
+                )
             } else {
                 Poll::Pending
             }
