@@ -23,9 +23,16 @@ use {
 /// to the place where asset isntance will be.
 /// So polling `Handle` isn't necessary for asset to be loaded.
 /// When asset is finally loaded any task that polled `Handle` will be notified.
-#[derive(Clone)]
 pub struct Handle<A: Asset> {
     state: Rc<State<A>>,
+}
+
+impl<A: Asset> Clone for Handle<A> {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+        }
+    }
 }
 
 impl<A> Eq for Handle<A> where A: Asset {}
@@ -73,7 +80,7 @@ where
 
 impl<A> Future for Handle<A>
 where
-    A: Asset,
+    A: Asset + Clone,
 {
     type Output = Result<A, Error<A>>;
 
