@@ -16,7 +16,7 @@ use core::fmt::Display;
 /// that are produced by `Format` implemetations.
 ///
 /// [`Format`]: ./trait.Format.html
-pub trait Asset: MaybeSend + MaybeSync + Sized + Clone + 'static {
+pub trait Asset: MaybeSend + MaybeSync + Sized + 'static {
     /// Error that may occur during asset building.
     #[cfg(feature = "std")]
     type Error: Error + MaybeSend + MaybeSync;
@@ -82,7 +82,7 @@ pub trait AssetDefaultFormat<K>: Asset {
 /// Shortcut for implementing [`Asset`] when asset building is synchronous.
 ///
 /// [`Asset`]: ./trait.Asset.html
-pub trait SyncAsset: MaybeSend + MaybeSync + Sized + Clone + 'static {
+pub trait SyncAsset: MaybeSend + MaybeSync + Sized + 'static {
     /// Error that may occur during asset building.
     #[cfg(feature = "std")]
     type Error: Error + MaybeSend + MaybeSync;
@@ -132,7 +132,7 @@ pub struct PhantomContext;
 ///
 /// [`Asset`]: ./trait.Asset.html
 /// [`Format`]: ./trait.Format.html
-pub trait SimpleAsset: MaybeSend + MaybeSync + Sized + Clone + 'static {}
+pub trait SimpleAsset: MaybeSend + MaybeSync + Sized + 'static {}
 
 impl<S> SyncAsset for S
 where
