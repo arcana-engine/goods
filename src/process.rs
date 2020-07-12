@@ -54,7 +54,7 @@ impl Processor {
                 entry.insert(Box::new(Processes::<A::Context> { receiver }));
                 sender
             }
-            Entry::Occupied(entry) => Any::downcast_ref::<Processes<A::Context>>(&*entry.get())
+            Entry::Occupied(entry) => Any::downcast_ref::<Processes<A::Context>>(&**entry.get())
                 .unwrap()
                 .receiver
                 .sender(),
