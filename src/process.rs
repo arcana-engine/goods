@@ -6,10 +6,15 @@ use {
     alloc::{boxed::Box, vec::Vec},
     core::any::{Any, TypeId},
     hashbrown::hash_map::{Entry, HashMap},
-    maybe_sync::{dyn_maybe_send, MaybeSend, Mutex},
 };
 
-pub(crate) trait AnyProcess<C>: MaybeSend {
+#[cfg(feature = "std")]
+use parking_lot::Mutex;
+
+#[cfg(not(feature = "std"))]
+use spin::Mutex;
+
+pub(crate) trait AnyProcess<C> {
     fn run(self: Box<Self>, ctx: &mut C);
 }
 
@@ -28,11 +33,11 @@ where
 }
 
 struct Processes<C> {
-    receiver: Receiver<Box<dyn AnyProcess<C>>>,
+    receiver: Receiver<Box<dyn AnyProcess<C> + Send>>,
 }
 
 pub(crate) struct Processor {
-    processes: Mutex<HashMap<TypeId, Box<dyn_maybe_send!(Any)>>>,
+    processes: Mutex<HashMap<TypeId, Box<dyn Any + Send>>>,
 }
 
 impl Processor {
@@ -42,7 +47,7 @@ impl Processor {
         }
     }
 
-    pub(crate) fn sender<A>(&self) -> Sender<Box<dyn AnyProcess<A::Context>>>
+    pub(crate) fn sender<A>(&self) -> Sender<Box<dyn AnyProcess<A::Context> + Send>>
     where
         A: Asset,
     {

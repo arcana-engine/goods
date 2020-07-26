@@ -1,13 +1,13 @@
 use {
-    crate::source::{Source, SourceError},
-    alloc::{boxed::Box, vec::Vec},
+    crate::source::{LocalSource, Source, SourceError},
+    alloc::{boxed::Box, sync::Arc, vec::Vec},
     core::fmt::{self, Debug},
-    maybe_sync::Rc,
 };
 
 /// Builder for source registry.
 pub struct RegistryBuilder<K: ?Sized> {
-    storages: Vec<Box<dyn Source<K>>>,
+    sources: Vec<Box<dyn Source<K>>>,
+    local_sources: Vec<Box<dyn LocalSource<K>>>,
 }
 
 impl<K> Default for RegistryBuilder<K>
@@ -26,7 +26,8 @@ where
     /// Create new empty builder.
     pub fn new() -> Self {
         RegistryBuilder {
-            storages: Vec::new(),
+            sources: Vec::new(),
+            local_sources: Vec::new(),
         }
     }
 
@@ -37,15 +38,28 @@ where
     }
 
     /// Add source to the registry builder.
+    pub fn with_local(mut self, storage: impl LocalSource<K>) -> Self {
+        self.add_local(storage);
+        self
+    }
+
+    /// Add source to the registry builder.
     pub fn add(&mut self, storage: impl Source<K>) -> &mut Self {
-        self.storages.push(Box::new(storage));
+        self.sources.push(Box::new(storage));
+        self
+    }
+
+    /// Add source to the registry builder.
+    pub fn add_local(&mut self, storage: impl LocalSource<K>) -> &mut Self {
+        self.local_sources.push(Box::new(storage));
         self
     }
 
     /// Build registry.
     pub fn build(self) -> Registry<K> {
         Registry {
-            storages: self.storages.into(),
+            sources: self.sources.into(),
+            local_sources: self.local_sources.into(),
         }
     }
 }
@@ -53,7 +67,8 @@ where
 /// Collection of registered sources.
 /// Used by `Cache` to load new assets.
 pub struct Registry<K: ?Sized> {
-    storages: Rc<[Box<dyn Source<K>>]>,
+    sources: Arc<[Box<dyn Source<K>>]>,
+    local_sources: Arc<[Box<dyn LocalSource<K>>]>,
 }
 
 impl<K> Clone for Registry<K>
@@ -62,7 +77,8 @@ where
 {
     fn clone(&self) -> Self {
         Registry {
-            storages: self.storages.clone(),
+            sources: self.sources.clone(),
+            local_sources: self.local_sources.clone(),
         }
     }
 }
@@ -79,9 +95,32 @@ where
     /// Try to read data for asset with specified key.
     /// This method will try to read asset from all registered sources one-by-one.
     /// Returns as soon as first source returns anything except `SourceError::NotFound`.
+    ///
+    /// This method ignores sources that return non-send futures.
     pub async fn read(self, key: K) -> Result<Vec<u8>, SourceError> {
-        for storage in &*self.storages {
+        for storage in &*self.sources {
             match storage.read(&key).await {
+                Err(SourceError::NotFound) => continue,
+                result => return result,
+            }
+        }
+        Err(SourceError::NotFound)
+    }
+
+    /// Try to read data for asset with specified key.
+    /// This method will try to read asset from all registered sources one-by-one.
+    /// Returns as soon as first source returns anything except `SourceError::NotFound`.
+    ///
+    /// This method reads from sources that return non-send futures.
+    pub async fn read_local(self, key: K) -> Result<Vec<u8>, SourceError> {
+        for source in &*self.sources {
+            match source.read(&key).await {
+                Err(SourceError::NotFound) => continue,
+                result => return result,
+            }
+        }
+        for source in &*self.local_sources {
+            match source.read(&key).await {
                 Err(SourceError::NotFound) => continue,
                 result => return result,
             }
@@ -93,7 +132,7 @@ where
 impl<K> Debug for Registry<K> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("Registry")
-            .field("storages", &self.storages)
+            .field("sources", &self.sources)
             .finish()
     }
 }

@@ -17,10 +17,16 @@ mod fetch;
 pub use self::fetch::*;
 
 use {
-    alloc::vec::Vec,
+    alloc::{sync::Arc, vec::Vec},
     core::fmt::{self, Debug, Display},
-    maybe_sync::{dyn_maybe_send_sync, BoxFuture, MaybeSend, MaybeSync, Rc},
+    futures_core::future::{BoxFuture, LocalBoxFuture},
 };
+
+#[cfg(feature = "std")]
+use std::error::Error;
+
+#[cfg(not(feature = "std"))]
+use core::fmt::Display as Error;
 
 /// Error type for [`Source`]s.
 ///
@@ -30,12 +36,7 @@ pub enum SourceError {
     NotFound,
 
     /// Custom source error.
-    #[cfg(not(feature = "std"))]
-    Error(Rc<dyn_maybe_send_sync!(Display)>),
-
-    /// Custom source error.
-    #[cfg(feature = "std")]
-    Error(Rc<dyn_maybe_send_sync!(std::error::Error)>),
+    Error(Arc<dyn Error + Send + Sync>),
 }
 
 impl Debug for SourceError {
@@ -67,7 +68,15 @@ impl std::error::Error for SourceError {
 }
 
 /// Asset data source.
-pub trait Source<K: ?Sized>: core::fmt::Debug + MaybeSend + MaybeSync + 'static {
+pub trait LocalSource<K: ?Sized>: Debug + Send + Sync + 'static {
+    /// Reads asset asynchronously.
+    /// Returns async bytes on success.
+    /// Otherwise returns error `E` describing occurred problem.
+    fn read(&self, key: &K) -> LocalBoxFuture<'_, Result<Vec<u8>, SourceError>>;
+}
+
+/// Asset data source.
+pub trait Source<K: ?Sized>: Debug + Send + Sync + 'static {
     /// Reads asset asynchronously.
     /// Returns async bytes on success.
     /// Otherwise returns error `E` describing occurred problem.

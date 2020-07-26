@@ -1,4 +1,4 @@
-use maybe_sync::BoxFuture;
+use futures_core::future::{BoxFuture, LocalBoxFuture};
 
 pub struct SpawnError;
 
@@ -6,24 +6,27 @@ pub trait Spawn: core::fmt::Debug {
     fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError>;
 }
 
-#[cfg(all(feature = "futures-spawn", feature = "sync"))]
+pub trait LocalSpawn: core::fmt::Debug {
+    fn spawn(&self, future: LocalBoxFuture<'static, ()>) -> Result<(), SpawnError>;
+}
+
+#[cfg(all(feature = "futures-spawn"))]
 impl<S> Spawn for S
 where
     S: futures_task::Spawn + core::fmt::Debug,
 {
     fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError> {
-        <&S as futures_util::task::SpawnExt>::spawn(&self, future).map_err(|_| SpawnError)
+        <S as futures_util::task::SpawnExt>::spawn(self, future).map_err(|_| SpawnError)
     }
 }
 
-#[cfg(all(feature = "futures-spawn", not(feature = "sync")))]
-impl<S> Spawn for S
+#[cfg(all(feature = "futures-spawn"))]
+impl<S> LocalSpawn for S
 where
     S: futures_task::LocalSpawn + core::fmt::Debug,
 {
-    fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError> {
-        <&S as futures_util::task::LocalSpawnExt>::spawn_local(&self, future)
-            .map_err(|_| SpawnError)
+    fn spawn(&self, future: LocalBoxFuture<'static, ()>) -> Result<(), SpawnError> {
+        <S as futures_util::task::LocalSpawnExt>::spawn_local(self, future).map_err(|_| SpawnError)
     }
 }
 
@@ -56,8 +59,8 @@ impl Spawn for Tokio {
 pub struct WasmBindgen;
 
 #[cfg(all(feature = "wasm-bindgen-spawn", target_arch = "wasm32"))]
-impl Spawn for WasmBindgen {
-    fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError> {
+impl LocalSpawn for WasmBindgen {
+    fn spawn(&self, future: LocalBoxFuture<'static, ()>) -> Result<(), SpawnError> {
         wasm_bindgen_futures::spawn_local(future);
         Ok(())
     }

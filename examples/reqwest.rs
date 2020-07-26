@@ -70,6 +70,6 @@ async fn main() {
     );
 
     // Await for handles treating them as `Future`.
-    println!("From json: {:#?}", object_json.await);
-    println!("From yaml: {:#?}", object_yaml.await);
+    log::info!("From json: {:#?}", object_json.await);
+    log::info!("From yaml: {:#?}", object_yaml.await);
 }

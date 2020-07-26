@@ -1,22 +1,27 @@
 use {
-    alloc::vec::Vec,
+    alloc::{sync::Arc, vec::Vec},
     core::{
         future::Future,
         mem::swap,
         pin::Pin,
         task::{Context, Poll, Waker},
     },
-    maybe_sync::{Mutex, Rc},
 };
+
+#[cfg(feature = "std")]
+use parking_lot::Mutex;
+
+#[cfg(not(feature = "std"))]
+use spin::Mutex;
 
 /// Reciver for spin-lock based channel.
 pub(crate) struct Receiver<T> {
-    inner: Rc<Mutex<Queue<T>>>,
+    inner: Arc<Mutex<Queue<T>>>,
 }
 
 impl<T> Receiver<T> {
     pub(crate) fn new() -> Self {
-        let inner = Rc::new(Mutex::new(Queue {
+        let inner = Arc::new(Mutex::new(Queue {
             array: Vec::new(),
             wakers: Vec::new(),
         }));
@@ -37,7 +42,7 @@ impl<T> Receiver<T> {
 
 /// Sender for spin-lock based channel.
 pub(crate) struct Sender<T> {
-    inner: Rc<Mutex<Queue<T>>>,
+    inner: Arc<Mutex<Queue<T>>>,
 }
 
 impl<T> Sender<T> {
@@ -57,7 +62,7 @@ struct Queue<T> {
 
 /// Spin-lock based shareable slot.
 pub(crate) struct Slot<T> {
-    inner: Rc<Mutex<SlotInner<T>>>,
+    inner: Arc<Mutex<SlotInner<T>>>,
 }
 
 impl<T> Slot<T> {
@@ -89,7 +94,7 @@ impl<T> Future for Slot<T> {
 
 /// Setter for spin-lock based channel.
 pub(crate) struct Setter<T> {
-    inner: Rc<Mutex<SlotInner<T>>>,
+    inner: Arc<Mutex<SlotInner<T>>>,
 }
 
 impl<T> Setter<T> {
@@ -103,13 +108,8 @@ impl<T> Setter<T> {
     }
 }
 
-struct SlotInner<T> {
-    value: Option<T>,
-    waker: Option<Waker>,
-}
-
 pub(crate) fn slot<T>() -> (Slot<T>, Setter<T>) {
-    let inner = Rc::new(Mutex::new(SlotInner {
+    let inner = Arc::new(Mutex::new(SlotInner {
         value: None,
         waker: None,
     }));
@@ -120,4 +120,9 @@ pub(crate) fn slot<T>() -> (Slot<T>, Setter<T>) {
         },
         Setter { inner },
     )
+}
+
+struct SlotInner<T> {
+    value: Option<T>,
+    waker: Option<Waker>,
 }

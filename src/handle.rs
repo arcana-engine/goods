@@ -1,6 +1,10 @@
 use {
-    crate::{asset::Asset, Error},
-    alloc::vec::Vec,
+    crate::{asset::Asset, error::Error},
+    alloc::{
+        fmt::{self, Debug},
+        sync::Arc,
+        vec::Vec,
+    },
     core::{
         any::Any,
         cell::UnsafeCell,
@@ -12,8 +16,13 @@ use {
         sync::atomic::{AtomicBool, Ordering},
         task::{Context, Poll, Waker},
     },
-    maybe_sync::{Mutex, Rc},
 };
+
+#[cfg(feature = "std")]
+use parking_lot::Mutex;
+
+#[cfg(not(feature = "std"))]
+use spin::Mutex;
 
 /// Handle for an asset of type `A` that eventually
 /// resolves to the asset instance or an error.
@@ -24,7 +33,7 @@ use {
 /// So polling `Handle` isn't necessary for asset to be loaded.
 /// When asset is finally loaded any task that polled `Handle` will be notified.
 pub struct Handle<A: Asset> {
-    state: Rc<State<A>>,
+    state: Arc<State<A>>,
 }
 
 impl<A: Asset> Clone for Handle<A> {
@@ -32,6 +41,15 @@ impl<A: Asset> Clone for Handle<A> {
         Self {
             state: self.state.clone(),
         }
+    }
+}
+
+impl<A> Debug for Handle<A>
+where
+    A: Asset,
+{
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(fmt, "{:p}", &self.state)
     }
 }
 
@@ -60,7 +78,7 @@ where
 
 struct State<A: Asset> {
     wakers: Mutex<Vec<Waker>>,
-    storage: UnsafeCell<MaybeUninit<Result<A, Error<A>>>>,
+    storage: UnsafeCell<MaybeUninit<Result<A, Error>>>,
     set: AtomicBool,
 }
 
@@ -82,16 +100,16 @@ impl<A> Future for Handle<A>
 where
     A: Asset + Clone,
 {
-    type Output = Result<A, Error<A>>;
+    type Output = Result<A, Error>;
 
-    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Result<A, Error<A>>> {
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Result<A, Error>> {
         let state = &self.into_ref().get_ref().state;
 
         if state.set.load(Ordering::Acquire) {
             Poll::Ready(Result::clone(unsafe {
                 // check above guaranties that storage was initialzied
                 // and will never accessed mutably until `State` is dropped.
-                &*(state.storage.get() as *const Result<A, Error<A>>)
+                &*(state.storage.get() as *const Result<A, Error>)
             }))
         } else {
             let waker = context.waker();
@@ -108,7 +126,7 @@ where
                     unsafe {
                         // check above guaranties that storage was initialzied
                         // and will never accessed mutably until `State` is dropped.
-                        &*(state.storage.get() as *const Result<A, Error<A>>)
+                        &*(state.storage.get() as *const Result<A, Error>)
                     }
                     .clone(),
                 )
@@ -125,7 +143,7 @@ where
 {
     pub(crate) fn new() -> Self {
         Handle {
-            state: Rc::new(State {
+            state: Arc::new(State {
                 wakers: Mutex::default(),
                 storage: UnsafeCell::new(MaybeUninit::uninit()),
                 set: AtomicBool::new(false),
@@ -137,9 +155,9 @@ where
     /// Returns `Poll::Ready(Ok(asset))` if asset was successfully loaded.
     /// Returns `Poll::Ready(Err(error))` if error occured.
     /// Otherwise returns `Poll::Pending` as asset wasn't yet loaded.
-    pub fn query(&self) -> Poll<&Result<A, Error<A>>> {
+    pub fn query(&self) -> Poll<&Result<A, Error>> {
         if self.state.set.load(Ordering::Acquire) {
-            Poll::Ready(unsafe { &*(self.state.storage.get() as *mut Result<A, Error<A>>) })
+            Poll::Ready(unsafe { &*(self.state.storage.get() as *mut Result<A, Error>) })
         } else {
             Poll::Pending
         }
@@ -179,7 +197,18 @@ where
         }
     }
 
-    pub(crate) fn set(&self, result: Result<A, Error<A>>) {
+    pub(crate) fn set(&self, result: Result<A, Error>) {
+        match &result {
+            Ok(_) => {
+                #[cfg(feature = "trace")]
+                tracing::debug!("Asset {:?} loaded", self);
+            }
+            Err(_err) => {
+                #[cfg(feature = "trace")]
+                tracing::error!("Failed to load asset {:?}: {}", self, *_err);
+            }
+        }
+
         assert!(!self.state.set.load(Ordering::SeqCst));
         unsafe {
             ptr::write((&mut *self.state.storage.get()).as_mut_ptr(), result);
@@ -191,11 +220,7 @@ where
 
 #[derive(Clone)]
 pub(crate) struct AnyHandle {
-    #[cfg(not(feature = "sync"))]
-    state: Rc<dyn Any>,
-
-    #[cfg(feature = "sync")]
-    state: Rc<dyn Any + Send + Sync>,
+    state: Arc<dyn Any + Send + Sync>,
 }
 
 impl<A> From<Handle<A>> for AnyHandle
@@ -212,7 +237,7 @@ where
 impl AnyHandle {
     pub fn downcast<A: Asset>(self) -> Option<Handle<A>> {
         Some(Handle {
-            state: Rc::downcast(self.state).ok()?,
+            state: Arc::downcast(self.state).ok()?,
         })
     }
 }

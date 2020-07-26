@@ -48,20 +48,20 @@ pub async fn run() {
         // To get file path it joins root path with asset key.
         // asset key type must implement `AsRef<Path>`.
         // `String` type does.
-        .with(FetchSource::new())
+        .with_local(FetchSource::new())
         .build();
 
     // Create new asset cache with built registry.
-    let cache = Cache::new(registry, WasmBindgen);
+    let cache = Cache::local(registry, WasmBindgen);
 
     // Now lets finally load some assets.
     // First asset will be "asset.json".
-    // We expect `FsSource` to find the sibling file with that name.
+    // We expect `FetchSource` to fetch file with that name.
     // `Object`s default format is json, so we don't have to specify it here.
     let object_json: Handle<Object> = cache.load("asset.json".to_string());
 
     // Another asset will be "asset.yaml".
-    // Again, sibling file with the name will be read by `FsSource` we added in the registry.
+    // Again, file with the name will be fetched by `FetchSource` in the registry.
     // Alternative loading function accepts format for data decoding,
     // and here we specify `YamlFormat` to read YAML document from the file.
     let object_yaml: Handle<Object> = cache.load_with_format("asset.yaml".to_string(), YamlFormat);

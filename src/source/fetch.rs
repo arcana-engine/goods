@@ -1,36 +1,29 @@
-#[cfg(feature = "sync")]
-core::compile_error!("`FetchSource` cannot be used with `sync` feature which is enabled by default. If you build this crate to run in browser you may simply turn it off as there are no threads");
-
-#[cfg(not(feature = "sync"))]
 use {
-    crate::source::{Source, SourceError},
-    alloc::{boxed::Box, string::String, vec::Vec},
+    crate::source::{LocalSource, SourceError},
+    alloc::{boxed::Box, string::String, vec::Vec, sync::Arc, format},
     core::fmt::{self, Display},
     js_sys::{ArrayBuffer, Uint8Array},
-    maybe_sync::{BoxFuture, Rc},
     wasm_bindgen::JsValue,
     wasm_bindgen_futures::JsFuture,
     web_sys::Response,
+    futures_core::future::LocalBoxFuture,
 };
 
-#[cfg(not(feature = "sync"))]
 #[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "fetch")))]
 #[derive(Debug, Default)]
 pub struct FetchSource;
 
-#[cfg(not(feature = "sync"))]
 impl FetchSource {
     pub fn new() -> Self {
         FetchSource
     }
 }
 
-#[cfg(not(feature = "sync"))]
-impl<U> Source<U> for FetchSource
+impl<U> LocalSource<U> for FetchSource
 where
     U: AsRef<str>,
 {
-    fn read(&self, url: &U) -> BoxFuture<'_, Result<Vec<u8>, SourceError>> {
+    fn read(&self, url: &U) -> LocalBoxFuture<'_, Result<Vec<u8>, SourceError>> {
         match web_sys::window() {
             Some(window) => {
                 let future: JsFuture = window.fetch_with_str(url.as_ref()).into();
@@ -46,43 +39,50 @@ where
                                             let u8array = Uint8Array::new(&array_buffer);
                                             Ok(u8array.to_vec())
                                         }
-                                        Err(err) => Err(SourceError::Error(Rc::new(JsError(err)))),
+                                        Err(err) => Err(SourceError::Error(Arc::new(JsError::from(err)))),
                                     },
-                                    Err(err) => Err(SourceError::Error(Rc::new(JsError(err)))),
+                                    Err(err) => Err(SourceError::Error(Arc::new(JsError::from(err)))),
                                 }
                             } else {
-                                log::debug!("Asset fetch failed. Status: {}", response.status());
+                                #[cfg(feature = "trace")]
+                                tracing::debug!("Asset fetch failed. Status: {}", response.status());
                                 Err(SourceError::NotFound)
                             }
                         }
-                        Err(err) => {
-                            log::debug!("Asset fetch failed. Error: {:?}", err);
+                        Err(_err) => {
+                            #[cfg(feature = "trace")]
+                            tracing::debug!("Asset fetch failed. Error: {:?}", _err);
                             Err(SourceError::NotFound)
                         }
                     }
                 })
             }
             None => {
-                log::error!("Failed to fetch `Window`");
+                #[cfg(feature = "trace")]
+                tracing::error!("Failed to fetch `Window`");
                 Box::pin(async { Err(SourceError::NotFound) })
             }
         }
     }
 }
 
-#[cfg(not(feature = "sync"))]
-#[derive(Clone, Debug)]
-struct JsError(JsValue);
+#[derive(Debug)]
+struct JsError(String);
 
-#[cfg(not(feature = "sync"))]
-impl Display for JsError {
-    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match js_sys::JSON::stringify(&self.0) {
-            Ok(string) => write!(fmt, "{}", String::from(string)),
-            Err(_) => write!(fmt, "<{:?}>", self.0),
+impl From<JsValue> for JsError {
+    fn from(value: JsValue) -> Self {
+        match js_sys::JSON::stringify(&value) {
+            Ok(string) => JsError(String::from(string)),
+            Err(_) => JsError(format!("<{:?}>", value)),
         }
     }
 }
 
-#[cfg(all(not(feature = "sync"), feature = "std"))]
+impl Display for JsError {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt.write_str(&self.0)
+    }
+}
+
+#[cfg(feature = "std")]
 impl std::error::Error for JsError {}

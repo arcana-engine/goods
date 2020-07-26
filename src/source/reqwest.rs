@@ -1,7 +1,7 @@
 use {
     crate::source::{Source, SourceError},
-    alloc::{boxed::Box, vec::Vec},
-    maybe_sync::{BoxFuture, Rc},
+    alloc::{boxed::Box, vec::Vec, sync::Arc},
+    futures_core::future::BoxFuture,
     reqwest::{Client, IntoUrl, StatusCode},
 };
 
@@ -31,8 +31,9 @@ where
         let request = self.client.get(url.clone()).send();
 
         Box::pin(async move {
-            let response = request.await.map_err(|err| {
-                log::debug!("Error fetchin asset: {}", err);
+            let response = request.await.map_err(|_err| {
+                #[cfg(feature = "trace")]
+                tracing::debug!("Error fetching asset: {}", _err);
                 SourceError::NotFound
             })?;
             let status = response.status();
@@ -41,14 +42,15 @@ where
                     let bytes = response
                         .bytes()
                         .await
-                        .map_err(|err| SourceError::Error(Rc::new(err)))?;
+                        .map_err(|err| SourceError::Error(Arc::new(err)))?;
                     Ok(bytes.as_ref().to_vec())
                 }
                 StatusCode::NO_CONTENT | StatusCode::MOVED_PERMANENTLY | StatusCode::NOT_FOUND => {
                     Err(SourceError::NotFound)
                 }
                 _ => {
-                    log::warn!("Unexpected status: {}", status);
+                    #[cfg(feature = "trace")]
+                    tracing::warn!("Unexpected status: {}", status);
                     Err(SourceError::NotFound)
                 }
             }
