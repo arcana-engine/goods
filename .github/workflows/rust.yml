@@ -30,7 +30,7 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --all --no-default-features --features=std,sync,fetch,json-format,yaml-format,ron-format,tokio-spawn,futures-spawn
+        args: --all --no-default-features --features=std,fetch,json-format,yaml-format,ron-format,tokio-spawn,futures-spawn
 
   cross:
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: check
-        args: --all --no-default-features --features=std,sync,fetch,json-format,yaml-format,ron-format,tokio-spawn,futures-spawn
+        args: --all --no-default-features --features=std,fetch,json-format,yaml-format,ron-format,tokio-spawn,futures-spawn
     - name: Run cargo check
       if: ${{ matrix.target == 'wasm32-unknown-unknown' }}
       uses: actions-rs/cargo@v1
