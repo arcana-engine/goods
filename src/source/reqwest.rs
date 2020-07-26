@@ -1,6 +1,6 @@
 use {
     crate::source::{Source, SourceError},
-    alloc::{boxed::Box, vec::Vec, sync::Arc},
+    alloc::{boxed::Box, sync::Arc, vec::Vec},
     futures_core::future::BoxFuture,
     reqwest::{Client, IntoUrl, StatusCode},
 };

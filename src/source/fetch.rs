@@ -1,12 +1,12 @@
 use {
     crate::source::{LocalSource, SourceError},
-    alloc::{boxed::Box, string::String, vec::Vec, sync::Arc, format},
+    alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec},
     core::fmt::{self, Display},
+    futures_core::future::LocalBoxFuture,
     js_sys::{ArrayBuffer, Uint8Array},
     wasm_bindgen::JsValue,
     wasm_bindgen_futures::JsFuture,
     web_sys::Response,
-    futures_core::future::LocalBoxFuture,
 };
 
 #[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "fetch")))]
@@ -39,13 +39,20 @@ where
                                             let u8array = Uint8Array::new(&array_buffer);
                                             Ok(u8array.to_vec())
                                         }
-                                        Err(err) => Err(SourceError::Error(Arc::new(JsError::from(err)))),
+                                        Err(err) => {
+                                            Err(SourceError::Error(Arc::new(JsError::from(err))))
+                                        }
                                     },
-                                    Err(err) => Err(SourceError::Error(Arc::new(JsError::from(err)))),
+                                    Err(err) => {
+                                        Err(SourceError::Error(Arc::new(JsError::from(err))))
+                                    }
                                 }
                             } else {
                                 #[cfg(feature = "trace")]
-                                tracing::debug!("Asset fetch failed. Status: {}", response.status());
+                                tracing::debug!(
+                                    "Asset fetch failed. Status: {}",
+                                    response.status()
+                                );
                                 Err(SourceError::NotFound)
                             }
                         }

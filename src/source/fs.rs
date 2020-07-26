@@ -1,7 +1,10 @@
 use {
     crate::source::{Source, SourceError},
-    std::{path::{Path, PathBuf}, sync::Arc},
     futures_core::future::BoxFuture,
+    std::{
+        path::{Path, PathBuf},
+        sync::Arc,
+    },
 };
 
 /// Asset source that treats asset key as relative file path,
