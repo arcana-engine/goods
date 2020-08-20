@@ -56,15 +56,13 @@ All out-of-the-box functionality exept core traits and types can be enabled with
 
 * `std` - adds implementation of [`std::error::Error`] trait for error types.
   Enabled by default.
-* `sync` - makes most types [`Send`] and some [`Sync`]. Adds requirements for traits implementations to be [`Send`] and [`Sync`] where needed.
-  Enabled by default.
 
 ### Sources
 
 * `fs` (enables `std`) - adds [`FileSource`] - [`Source`] implementation that loads asset bytes from file-system.
 * `reqwest` - adds [`ReqwestSource`] - [`Source`] implementation that loads asset bytes from URLs using [`reqwest`].
   Using this source requires spawner to spawn tasks with [`tokio`]. Otherwise [`reqwest`] interals will panic.
-* `fetch` - adds [`FetchSource`] that uses browser's Fetch API to load assets data. *Conflicts with `sync` feature*.
+* `fetch` - adds [`FetchSource`] that uses browser's Fetch API to load assets data.
 
 ### Formats
 
@@ -102,11 +100,6 @@ python3 server.py
 
 Then open http://localhost:8000/fetch in your favorite browser.
 Loaded assets must be shown on the page. Otherwise see for errors in log.
-
-## Gotchas
-
-* Currently asyn/await doesn't work with `no_std` on `stable`
-* `sync` conflicts with `fetch` feature. But in general `sync` is not necessary when targeting web browser.
 
 ## License
 
