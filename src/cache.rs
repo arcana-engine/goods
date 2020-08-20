@@ -211,6 +211,7 @@ impl<K> Cache<K> {
                     let task: LocalBoxFuture<'_, _> =
                         if TypeId::of::<A::Context>() == TypeId::of::<PhantomContext>() {
                             Box::pin(load_asset_with_phantom_context(
+                                key.clone(),
                                 self.registry.clone().read_local(key),
                                 format,
                                 self.clone(),
@@ -218,7 +219,8 @@ impl<K> Cache<K> {
                             ))
                         } else {
                             Box::pin(load_asset(
-                                self.registry.clone().read(key),
+                                key.clone(),
+                                self.registry.clone().read_local(key),
                                 format,
                                 self.clone(),
                                 self.inner.processor.sender::<A>(),
@@ -233,6 +235,7 @@ impl<K> Cache<K> {
                     let task: BoxFuture<'_, _> =
                         if TypeId::of::<A::Context>() == TypeId::of::<PhantomContext>() {
                             Box::pin(load_asset_with_phantom_context(
+                                key.clone(),
                                 self.registry.clone().read(key),
                                 format,
                                 self.clone(),
@@ -240,6 +243,7 @@ impl<K> Cache<K> {
                             ))
                         } else {
                             Box::pin(load_asset(
+                                key.clone(),
                                 self.registry.clone().read(key),
                                 format,
                                 self.clone(),
@@ -304,6 +308,7 @@ impl<K> Cache<K> {
 
 #[cfg_attr(feature = "trace", tracing::instrument(skip(loading, process_sender)))]
 pub(crate) async fn load_asset<A, F, K, L>(
+    key: K,
     loading: L,
     format: F,
     cache: Cache<K>,
@@ -312,12 +317,13 @@ pub(crate) async fn load_asset<A, F, K, L>(
 ) where
     A: Asset,
     F: Format<A, K>,
+    K: Debug,
     L: Future<Output = Result<Vec<u8>, SourceError>> + 'static,
 {
     handle.set(
         async move {
             let bytes = loading.await?;
-            let decode = format.decode(bytes, &cache);
+            let decode = format.decode(key, bytes, &cache);
             drop(cache);
             let repr: A::Repr = decode.await.map_err(|err| Error::Format(Arc::new(err)))?;
             let (slot, setter) = slot::<A::BuildFuture>();
@@ -330,6 +336,7 @@ pub(crate) async fn load_asset<A, F, K, L>(
 
 #[cfg_attr(feature = "trace", tracing::instrument(skip(loading)))]
 pub(crate) async fn load_asset_with_phantom_context<A, F, K, L>(
+    key: K,
     loading: L,
     format: F,
     cache: Cache<K>,
@@ -337,6 +344,7 @@ pub(crate) async fn load_asset_with_phantom_context<A, F, K, L>(
 ) where
     A: Asset,
     F: Format<A, K>,
+    K: Debug,
     L: Future<Output = Result<Vec<u8>, SourceError>> + 'static,
 {
     debug_assert_eq!(TypeId::of::<A::Context>(), TypeId::of::<PhantomContext>());
@@ -346,7 +354,7 @@ pub(crate) async fn load_asset_with_phantom_context<A, F, K, L>(
             let bytes = loading.await?;
             #[cfg(feature = "trace")]
             tracing::trace!("Raw asset date loaded. {} bytes", bytes.len());
-            let decode = format.decode(bytes, &cache);
+            let decode = format.decode(key, bytes, &cache);
             drop(cache);
             let repr = decode.await.map_err(|err| Error::Format(Arc::new(err)))?;
             #[cfg(feature = "trace")]

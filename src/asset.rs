@@ -53,7 +53,7 @@ pub trait Format<A: Asset, K>: Send + Sync + Debug + 'static {
     type DecodeFuture: Future<Output = Result<A::Repr, Self::Error>> + Send + 'static;
 
     /// Decode asset intermediate representation from raw data using cache to fetch sub-assets.
-    fn decode(self, bytes: Vec<u8>, cache: &Cache<K>) -> Self::DecodeFuture;
+    fn decode(self, key: K, bytes: Vec<u8>, cache: &Cache<K>) -> Self::DecodeFuture;
 }
 
 /// Default format for given asset type.

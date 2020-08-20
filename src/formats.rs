@@ -23,7 +23,7 @@ where
     type Error = Infallible;
     type DecodeFuture = Ready<Result<A::Repr, Infallible>>;
 
-    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, Infallible>> {
+    fn decode(self, _: K, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, Infallible>> {
         ready(Ok(bytes.into()))
     }
 }
@@ -46,6 +46,7 @@ where
 
     fn decode(
         self,
+        _: K,
         bytes: Vec<u8>,
         _cache: &Cache<K>,
     ) -> Ready<Result<A::Repr, serde_json::Error>> {
@@ -71,6 +72,7 @@ where
 
     fn decode(
         self,
+        _: K,
         bytes: Vec<u8>,
         _cache: &Cache<K>,
     ) -> Ready<Result<A::Repr, serde_yaml::Error>> {
@@ -94,7 +96,12 @@ where
     type Error = ron::de::Error;
     type DecodeFuture = Ready<Result<A::Repr, Self::Error>>;
 
-    fn decode(self, bytes: Vec<u8>, _cache: &Cache<K>) -> Ready<Result<A::Repr, ron::de::Error>> {
+    fn decode(
+        self,
+        _: K,
+        bytes: Vec<u8>,
+        _cache: &Cache<K>,
+    ) -> Ready<Result<A::Repr, ron::de::Error>> {
         ready(ron::de::from_bytes(&bytes).map_err(Into::into))
     }
 }
