@@ -197,6 +197,14 @@ where
         }
     }
 
+    /// Returns asset error if it's failed.
+    pub fn get_err(&self) -> Option<&Error> {
+        match self.query() {
+            Poll::Ready(Err(err)) => Some(err),
+            _ => None,
+        }
+    }
+
     pub(crate) fn set(&self, result: Result<A, Error>) {
         match &result {
             Ok(_) => {

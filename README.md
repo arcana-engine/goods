@@ -63,6 +63,7 @@ All out-of-the-box functionality exept core traits and types can be enabled with
 * `reqwest` - adds [`ReqwestSource`] - [`Source`] implementation that loads asset bytes from URLs using [`reqwest`].
   Using this source requires spawner to spawn tasks with [`tokio`]. Otherwise [`reqwest`] interals will panic.
 * `fetch` - adds [`FetchSource`] that uses browser's Fetch API to load assets data.
+* `data-url` - adds [`DataUrlSource`] that reads data embeded directly to url.
 
 ### Formats
 

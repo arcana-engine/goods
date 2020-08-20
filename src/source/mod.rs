@@ -16,6 +16,12 @@ mod fetch;
 #[cfg(all(feature = "fetch", target_arch = "wasm32"))]
 pub use self::fetch::*;
 
+#[cfg(feature = "data-url")]
+mod dataurl;
+
+#[cfg(feature = "data-url")]
+pub use self::dataurl::*;
+
 use {
     alloc::{sync::Arc, vec::Vec},
     core::fmt::{self, Debug, Display},

@@ -31,6 +31,7 @@ wasm-bindgen-spawn = ["wasm-bindgen-futures"]
 tokio-spawn = ["tokio/rt-core"]
 
 trace = ["tracing", "tracing-futures"]
+data-url = ["base64"]
 
 [dependencies]
 futures-core = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -47,6 +48,8 @@ serde_yaml = { version = "0.8", optional = true, default-features = false }
 ron = { version = "0.6", optional = true, default-features = false }
 parking_lot = { version = "0.11", optional = true }
 spin = "0.5"
+base64 = { version = "0.12", optional = true }
+urlencoding = { version = "1.1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = { version = "0.10", optional = true, default-features = false }
@@ -73,6 +76,10 @@ web-sys = { version = "0.3.42", features = ["Document", "Text", "HtmlElement", "
 [[example]]
 name = "fs"
 required-features = ["fs", "json-format", "yaml-format", "futures-spawn"]
+
+[[example]]
+name = "dataurl"
+required-features = ["data-url", "json-format", "yaml-format", "futures-spawn", "base64"]
 
 [[example]]
 name = "reqwest"
