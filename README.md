@@ -50,7 +50,7 @@ Here's list of some of those features:
 
 ## Features
 
-All out-of-the-box functionality exept core traits and types can be enabled with features.
+All out-of-the-box functionality exept core traits and types must be enabled with features.
 
 ### General
 
@@ -59,11 +59,11 @@ All out-of-the-box functionality exept core traits and types can be enabled with
 
 ### Sources
 
-* `fs` (enables `std`) - adds [`FileSource`] - [`Source`] implementation that loads asset bytes from file-system.
-* `reqwest` - adds [`ReqwestSource`] - [`Source`] implementation that loads asset bytes from URLs using [`reqwest`].
+* `fs` (enables `std`) - adds [`FileSource`] - a [`Source`] implementation that loads asset bytes from file-system.
+* `reqwest` - adds [`ReqwestSource`] - a [`Source`] implementation that loads asset bytes from URLs using [`reqwest`].
   Using this source requires spawner to spawn tasks with [`tokio`]. Otherwise [`reqwest`] interals will panic.
-* `fetch` - adds [`FetchSource`] that uses browser's Fetch API to load assets data.
-* `data-url` - adds [`DataUrlSource`] that reads data embeded directly to url.
+* `fetch` - adds [`FetchSource`] - a [`Source`] implementation that uses browser's Fetch API to load assets data.
+* `data-url` - adds [`DataUrlSource`] - a [`Source`] implementation that reads data embeded directly to url.
 
 ### Formats
 
@@ -79,7 +79,7 @@ All out-of-the-box functionality exept core traits and types can be enabled with
 
 ## Examples
 
-There are few simple examples provided already.
+There are few simple examples provided to learn how use this crate.
 
 ### [fs examlple](./examples/fs.rs)
 Shows how to build registry with [`FileSource`] and load simple assets from it.
