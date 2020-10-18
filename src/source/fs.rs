@@ -31,11 +31,11 @@ where
     fn read(&self, path_or_url: &P) -> BoxFuture<'_, Result<Vec<u8>, SourceError>> {
         let path_or_url: &str = path_or_url.as_ref();
 
-        let path = if path_or_url.starts_with("file://") {
-            let path = if path_or_url["file://".len()..].starts_with("/") {
-                &path_or_url["file:///".len()..]
-            } else if path_or_url["file://".len()..].starts_with("localhost/") {
-                &path_or_url["file://localhost/".len()..]
+        let path = if let Some(stripped) = path_or_url.strip_prefix("file://") {
+            let path = if let Some(file_path) = stripped.strip_prefix('/') {
+                file_path
+            } else if let Some(localhost_path) = stripped.strip_prefix("localhost/") {
+                localhost_path
             } else {
                 return Box::pin(ready(Err(SourceError::NotFound)));
             };

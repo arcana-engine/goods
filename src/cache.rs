@@ -130,19 +130,17 @@ impl<K> Cache<K> {
     where
         S: Spawn + Send + Sync + 'static,
     {
-        let cache = Cache {
+        #[cfg(feature = "trace")]
+        tracing::info!("Creating new asset cache");
+
+        Cache {
             registry,
             inner: Arc::new(Inner {
                 cache: Mutex::default(),
                 processor: Processor::new(),
                 spawn: SpawnWrapper { spawn },
             }),
-        };
-
-        #[cfg(feature = "trace")]
-        tracing::info!("New asset Cache created");
-
-        cache
+        }
     }
 
     /// Creates new asset cache.
@@ -152,19 +150,17 @@ impl<K> Cache<K> {
     where
         S: LocalSpawn + Send + Sync + 'static,
     {
-        let cache = Cache {
+        #[cfg(feature = "trace")]
+        tracing::info!("Creating new asset cache");
+
+        Cache {
             registry,
             inner: Arc::new(Inner {
                 cache: Mutex::default(),
                 processor: Processor::new(),
                 spawn: LocalSpawnWrapper { spawn },
             }),
-        };
-
-        #[cfg(feature = "trace")]
-        tracing::info!("New asset Cache created");
-
-        cache
+        }
     }
 
     /// Requests an asset by the `key`.
