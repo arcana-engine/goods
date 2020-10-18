@@ -1,10 +1,10 @@
 use {
-    crate::{ready, source::{Source, SourceError}},
-    futures_core::future::BoxFuture,
-    std::{
-        path::PathBuf,
-        sync::Arc,
+    crate::{
+        ready,
+        source::{Source, SourceError},
     },
+    futures_core::future::BoxFuture,
+    std::{path::PathBuf, sync::Arc},
 };
 
 /// Asset source that treats asset key as relative file path,
@@ -42,9 +42,7 @@ where
             #[cfg(feature = "urlencoding")]
             {
                 match urlencoding::decode(path) {
-                    Ok(decoded) => {
-                        self.root.join(&decoded)
-                    }
+                    Ok(decoded) => self.root.join(&decoded),
                     Err(err) => {
                         return Box::pin(ready(Err(SourceError::Error(Arc::new(err)))));
                     }
