@@ -5,12 +5,11 @@
 
 Easy-to-use asset manager for many environments.
 
-[![crates](https://img.shields.io/crates/v/goods.svg?label=goods)](https://crates.io/crates/goods)
-[![docs](https://docs.rs/goods/badge.svg)](https://docs.rs/goods)
-[![Actions](https://github.com/zakarumych/goods/workflows/Rust/badge.svg)](https://github.com/zakarumych/goods/actions?query=workflow%3ARust)
-[![MIT/Apache](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](COPYING)
-![Lines of Code](https://tokei.rs/b1/github/zakarumych/goods?category=code)
-[![dependency status](https://deps.rs/repo/github/zakarumych/goods/status.svg)](https://deps.rs/repo/github/zakarumych/goods)
+[![crates](https://img.shields.io/crates/v/goods.svg?style=for-the-badge&label=goods)](https://crates.io/crates/goods)
+[![docs](https://img.shields.io/badge/docs.rs-goods-66c2a5?style=for-the-badge&labelColor=555555&logoColor=white)](https://docs.rs/goods)
+[![actions](https://img.shields.io/github/workflow/status/zakarumych/goods/Rust/master?style=for-the-badge)](https://github.com/zakarumych/goods/actions?query=workflow%3ARust)
+[![MIT/Apache](https://img.shields.io/badge/license-MIT%2FApache-blue.svg?style=for-the-badge)](COPYING)
+![loc](https://img.shields.io/tokei/lines/github/zakarumych/goods?style=for-the-badge)
 
 Easy-to-use asset manager for many environments.
 
