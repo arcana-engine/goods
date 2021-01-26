@@ -36,8 +36,8 @@ impl<K> AssetDefaultFormat<K> for Object {
 #[wasm_bindgen]
 pub async fn run() {
     // Init logging system.
-    console_log::init_with_level(log::Level::Trace).unwrap_throw();
-    log::trace!("Running");
+    tracing_wasm::set_as_global_default();
+    tracing::trace!("Running");
 
     // Build source registry.
     // We'll use `String` as asset key.
@@ -67,8 +67,8 @@ pub async fn run() {
     let object_yaml: Handle<Object> = cache.load_with_format("asset.yaml".to_string(), YamlFormat);
 
     // Await for handles treating them as `Future`.
-    log::info!("From json: {:#?}", object_json.clone().await.unwrap_throw());
-    log::info!("From yaml: {:#?}", object_yaml.clone().await.unwrap_throw());
+    tracing::info!("From json: {:#?}", object_json.clone().await.unwrap_throw());
+    tracing::info!("From yaml: {:#?}", object_yaml.clone().await.unwrap_throw());
 
     let document = web_sys::window().unwrap_throw().document().unwrap_throw();
 

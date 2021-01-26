@@ -25,7 +25,10 @@ impl<K> AssetDefaultFormat<K> for Object {
 
 fn main() {
     // Init logging system.
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     // Build source registry.
     // We'll use `String` as asset key.
@@ -62,5 +65,5 @@ fn main() {
     let object_json = object_json.get().unwrap();
     assert_eq!(*object_json, object);
 
-    log::info!("From json: {:#?}", object_json);
+    tracing::info!("From json: {:#?}", object_json);
 }

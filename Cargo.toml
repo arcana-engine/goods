@@ -1,6 +1,6 @@
 [package]
 name = "goods"
-version = "0.6.0"
+version = "0.7.0"
 authors = ["zakarumych"]
 edition = "2018"
 description = "Asset manager for good assets"
@@ -28,7 +28,7 @@ reqwest-rustls-tls = ["reqwest/rustls-tls"]
 
 futures-spawn = ["futures-task", "futures-util"]
 wasm-bindgen-spawn = ["wasm-bindgen-futures"]
-tokio-spawn = ["tokio/rt-core"]
+tokio-spawn = ["tokio/rt"]
 
 trace = ["tracing", "tracing-futures"]
 data-url = ["base64"]
@@ -40,37 +40,37 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 
 tracing = { version = "0.1", default-features = false, features = ["attributes"], optional = true }
 tracing-futures = { version = "0.2", default-features = false, features = ["std-future"], optional = true }
-hashbrown = { version = "0.7" }
+hashbrown = { version = "0.9" }
 
 serde = { version = "1.0", optional = true, default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", optional = true, default-features = false, features = ["alloc"] }
 serde_yaml = { version = "0.8", optional = true, default-features = false }
 ron = { version = "0.6", optional = true, default-features = false }
 parking_lot = { version = "0.11", optional = true }
-spin = "0.5"
-base64 = { version = "0.12", optional = true }
+spin = "0.7"
+base64 = { version = "0.13", optional = true }
 urlencoding = { version = "1.1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-reqwest = { version = "0.10", optional = true, default-features = false }
-tokio = { version = "0.2", optional = true }
+reqwest = { version = "0.11", optional = true, default-features = false }
+tokio = { version = "1.0", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "=0.3.42", optional = true }
-js-sys = { version = "=0.3.42", optional = true }
+web-sys = { version = "=0.3.47", optional = true }
+js-sys = { version = "=0.3.47", optional = true }
 wasm-bindgen = { version = "0.2.65", optional = true }
 wasm-bindgen-futures = { version = "0.4.15", optional = true }
 
 [dev-dependencies]
-log = "0.4"
+tracing = "0.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-env_logger = "0.7"
-tokio = { version = "0.2", features = ["rt-core", "macros"] }
+tokio = { version = "1.0", features = ["rt", "macros"] }
+tracing-subscriber = { version = "0.2" }
 futures-executor = { version = "0.3", features = ["thread-pool"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-console_log = "0.2.0"
+tracing-wasm = "0.1"
 web-sys = { version = "0.3.42", features = ["Document", "Text", "HtmlElement", "Node"] }
 
 [[example]]

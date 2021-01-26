@@ -38,7 +38,10 @@ impl<K> AssetDefaultFormat<K> for Object {
 
 fn main() {
     // Init logging system.
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_env_filter(tracing_subscriber::EnvFilter::default())
+        .init();
 
     // Build source registry.
     // We'll use `String` as asset key.
@@ -75,6 +78,6 @@ fn main() {
         std::thread::yield_now();
     }
 
-    log::info!("From json: {:#?}", object_json.get().unwrap());
-    log::info!("From yaml: {:#?}", object_yaml.get().unwrap());
+    tracing::info!("From json: {:#?}", object_json.get().unwrap());
+    tracing::info!("From yaml: {:#?}", object_yaml.get().unwrap());
 }

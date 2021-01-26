@@ -36,10 +36,13 @@ impl<K> AssetDefaultFormat<K> for Object {
 }
 
 // Let's make it tokio based app
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     // Init loggger.
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     // Create new registry.
     let registry = Registry::builder()
@@ -70,6 +73,6 @@ async fn main() {
     );
 
     // Await for handles treating them as `Future`.
-    log::info!("From json: {:#?}", object_json.await);
-    log::info!("From yaml: {:#?}", object_yaml.await);
+    tracing::info!("From json: {:#?}", object_json.await);
+    tracing::info!("From yaml: {:#?}", object_yaml.await);
 }
