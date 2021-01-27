@@ -65,3 +65,16 @@ impl LocalSpawn for WasmBindgen {
         Ok(())
     }
 }
+
+#[cfg(feature = "smol-spawn")]
+#[derive(Clone, Debug)]
+#[cfg_attr(all(doc, feature = "unstable-doc"), doc(cfg(feature = "tokio-spawn")))]
+pub struct Smol;
+
+#[cfg(feature = "smol-spawn")]
+impl Spawn for Smol {
+    fn spawn(&self, future: BoxFuture<'static, ()>) -> Result<(), SpawnError> {
+        smol::spawn(future).detach();
+        Ok(())
+    }
+}

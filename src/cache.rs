@@ -318,13 +318,29 @@ pub(crate) async fn load_asset<A, F, K, L>(
 {
     handle.set(
         async move {
+            #[cfg(feature = "trace")]
+            tracing::trace!("Asset loading started");
+
             let bytes = loading.await?;
+            #[cfg(feature = "trace")]
+            tracing::trace!("Raw asset date loaded. {} bytes", bytes.len());
+
             let decode = format.decode(key, bytes, &cache);
             drop(cache);
             let repr: A::Repr = decode.await.map_err(|err| Error::Format(Arc::new(err)))?;
+            #[cfg(feature = "trace")]
+            tracing::trace!("Asset decoded");
+
             let (slot, setter) = slot::<A::BuildFuture>();
             process_sender.send(Box::new(Process::<A> { repr, setter }));
-            slot.await.await.map_err(|err| Error::Asset(Arc::new(err)))
+            let asset = slot
+                .await
+                .await
+                .map_err(|err| Error::Asset(Arc::new(err)))?;
+            #[cfg(feature = "trace")]
+            tracing::trace!("Asset loaded");
+
+            Ok(asset)
         }
         .await,
     )
@@ -347,20 +363,26 @@ pub(crate) async fn load_asset_with_phantom_context<A, F, K, L>(
 
     handle.set(
         async move {
+            #[cfg(feature = "trace")]
+            tracing::trace!("Asset loading started");
+
             let bytes = loading.await?;
             #[cfg(feature = "trace")]
             tracing::trace!("Raw asset date loaded. {} bytes", bytes.len());
+
             let decode = format.decode(key, bytes, &cache);
             drop(cache);
             let repr = decode.await.map_err(|err| Error::Format(Arc::new(err)))?;
             #[cfg(feature = "trace")]
             tracing::trace!("Asset decoded");
+
             let build = A::build(repr, unsafe {
                 &mut *{ &mut PhantomContext as *mut _ as *mut A::Context }
             });
             let asset = build.await.map_err(|err| Error::Asset(Arc::new(err)))?;
             #[cfg(feature = "trace")]
             tracing::trace!("Asset loaded");
+
             Ok(asset)
         }
         .await,
