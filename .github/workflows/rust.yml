@@ -30,22 +30,13 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --all --no-default-features --features=std,fetch,json-format,yaml-format,ron-format,tokio-spawn,futures-spawn
+        args: --all
 
-  cross:
+  wasm:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         rust-toolchain: [stable, nightly]
-        target:
-        - i686-pc-windows-gnu
-        - i686-pc-windows-msvc
-        - i686-unknown-linux-gnu
-        - x86_64-apple-darwin
-        - x86_64-pc-windows-gnu
-        - x86_64-pc-windows-msvc
-        - x86_64-unknown-linux-gnu
-        - wasm32-unknown-unknown
 
     steps:
     - uses: actions/checkout@v2
@@ -54,20 +45,13 @@ jobs:
       with:
         profile: minimal
         toolchain: ${{ matrix.rust-toolchain }}
-        target: ${{ matrix.target }}
+        target: wasm32-unknown-unknown
         override: true
     - name: Run cargo check
-      if: ${{ matrix.target != 'wasm32-unknown-unknown' }}
       uses: actions-rs/cargo@v1
       with:
         command: check
-        args: --all --no-default-features --features=std,fetch,json-format,yaml-format,ron-format,tokio-spawn,futures-spawn
-    - name: Run cargo check
-      if: ${{ matrix.target == 'wasm32-unknown-unknown' }}
-      uses: actions-rs/cargo@v1
-      with:
-        command: check
-        args: --all --no-default-features --features=std,fetch,json-format,yaml-format,ron-format,wasm-bindgen-spawn
+        args: --all
 
   lints:
     runs-on: ubuntu-latest
@@ -90,4 +74,4 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: clippy
-        args: --all-features -- -D warnings
+        args: -- -D warnings

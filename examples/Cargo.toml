@@ -1,0 +1,48 @@
+[package]
+name = "goods-examples"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+goods = { path = "../goods" }
+goods-fs = { path = "../fs" }
+goods-json = { path = "../json" }
+goods-yaml = { path = "../yaml" }
+goods-dataurl = { path = "../dataurl" }
+goods-fetch = { path = "../fetch" }
+goods-reqwest = { path = "../reqwest" }
+
+serde = { version = "1.0", features = ["derive"] }
+tracing = { version = "0.1" }
+tracing-subscriber = { version = "0.2" }
+cfg-if = { version = "1.0" }
+base64 = { version = "0.13" }
+serde_json = { version = "1.0" }
+
+tracing-wasm = { version = "0.1" }
+wasm-bindgen = { version = "=0.2.70", default-features = false }
+wasm-bindgen-futures = { version = "=0.4.20", default-features = false }
+web-sys = { version = "=0.3.47", default-features = false, features = ["Response", "Window", "Document", "HtmlElement"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.0", features = ["rt", "macros"] }
+
+[[bin]]
+name = "fs"
+path = "src/fs.rs"
+
+[[bin]]
+name = "dataurl"
+path = "src/dataurl.rs"
+
+[[bin]]
+name = "reqwest"
+path = "src/reqwest.rs"
+
+[[bin]]
+name = "fetch"
+path = "src/fetch.rs"

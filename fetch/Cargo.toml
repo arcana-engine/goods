@@ -1,0 +1,21 @@
+[package]
+name = "goods-fetch"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+description = "Fetch-API source for 'goods' asset manager"
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/goods-fetch"
+keywords = ["assets", "async", "no_std"]
+repository = "https://github.com/zakarumych/goods-fetch"
+readme = "../README.md"
+
+[dependencies]
+eyre = "0.6"
+goods = { version = "0.8.0", path = "../goods" }
+wasm-bindgen = { version = "=0.2.70" }
+wasm-bindgen-futures = { version = "=0.4.20" }
+web-sys = { version = "=0.3.47", features = ["Response", "Window"] }
+js-sys = { version = "=0.3.47" }
+futures-core = { version = "0.3" }
+spin = { version = "0.7" }

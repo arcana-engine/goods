@@ -1,0 +1,18 @@
+[package]
+name = "goods-fs"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+description = "File source for 'goods' asset manager"
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/goods-fs"
+keywords = ["assets", "async"]
+repository = "https://github.com/zakarumych/goods-fs"
+readme = "../README.md"
+
+[dependencies]
+goods = { version = "0.8.0", path = "../goods" }
+eyre = "0.6"
+tracing = { version = "0.1", optional = true }
+urlencoding = { version = "1.1", optional = true }
+futures-core = { version = "0.3" }
