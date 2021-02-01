@@ -1,0 +1,17 @@
+[package]
+name = "goods-json"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+description = "JSON format for 'goods' asset manager"
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/goods-json"
+keywords = ["assets", "async"]
+repository = "https://github.com/zakarumych/goods-json"
+readme = "../README.md"
+
+[dependencies]
+goods = { version = "0.8.0", path = "../goods" }
+eyre = "0.6"
+serde = { version = "1.0" }
+serde_json = { version = "1.0" }
