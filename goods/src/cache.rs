@@ -13,6 +13,7 @@ use {
         borrow::Borrow,
         cell::RefCell,
         fmt::{self, Debug},
+        future::Future,
         hash::{BuildHasher, Hash, Hasher},
         rc::Rc,
         sync::{Arc, Mutex},
@@ -66,13 +67,22 @@ impl<K> Cache<K> {
         }
     }
 
+    /// Read raw asset bytes without caching.
+    pub fn read(&self, key: K) -> impl Future<Output = eyre::Result<Box<[u8]>>> + Send + 'static
+    where
+        K: Key + Send + Sync,
+    {
+        let registry = self.registry.clone();
+        async move { registry.read(&key).await }
+    }
+
     /// Requests an asset by the `key`.
     /// Returns cached asset handle if same asset type was loaded from same `key` (even if loading is incomplete).
     /// Uses default asset format for decoding.
     pub fn load<A>(&self, key: K) -> Handle<A>
     where
         K: Key + Send + Sync,
-        A: AssetDefaultFormat<K> + Send + Sync,
+        A: AssetDefaultFormat + Send + Sync,
         A::DefaultFormat: Send,
         A::Repr: Send + Sync,
         A::BuildFuture: Send,
@@ -165,6 +175,7 @@ impl<K> Cache<K> {
     }
 }
 
+#[cfg_attr(feature = "trace", tracing::instrument)]
 async fn load_asset<A, F, K>(key: K, format: F, cache: Cache<K>) -> eyre::Result<A>
 where
     A: Asset,
@@ -246,13 +257,22 @@ impl<K> LocalCache<K> {
         }
     }
 
+    /// Read raw asset bytes without caching.
+    pub fn read(&self, key: K) -> impl Future<Output = eyre::Result<Box<[u8]>>> + 'static
+    where
+        K: Key,
+    {
+        let registry = self.registry.clone();
+        async move { registry.read(&key).await }
+    }
+
     /// Requests an asset by the `key`.
     /// Returns cached asset handle if same asset type was loaded from same `key` (even if loading is incomplete).
     /// Uses default asset format for decoding.
     pub fn load<A>(&self, key: K) -> LocalHandle<A>
     where
         K: Key,
-        A: AssetDefaultFormat<K>,
+        A: AssetDefaultFormat,
         A::DefaultFormat: LocalFormat<A::Repr, K>,
     {
         self.load_with_format(key, A::DefaultFormat::default())
@@ -340,6 +360,7 @@ impl<K> LocalCache<K> {
     }
 }
 
+#[cfg_attr(feature = "trace", tracing::instrument)]
 async fn load_asset_local<A, F, K>(key: K, format: F, cache: LocalCache<K>) -> eyre::Result<A>
 where
     A: Asset,

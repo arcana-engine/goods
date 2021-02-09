@@ -34,7 +34,7 @@ impl SimpleAsset for Object {}
 
 /// Let's say that default format for `Object` is `JsonFormat`.
 /// Only format types that implement `Default` may be default formats.
-impl<K> AssetDefaultFormat<K> for Object {
+impl AssetDefaultFormat for Object {
     type DefaultFormat = JsonFormat;
 }
 

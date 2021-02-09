@@ -1,6 +1,6 @@
 [package]
 name = "goods"
-version = "0.8.0"
+version = "0.9.0"
 authors = ["zakarumych"]
 edition = "2018"
 description = "Asset manager for good assets"

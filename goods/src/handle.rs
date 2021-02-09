@@ -77,10 +77,30 @@ impl<A> Debug for Inner<A> {
 /// Access to future is synchronized through .state
 unsafe impl<A> Sync for Inner<A> where A: Send + Sync {}
 
-#[derive(Clone, Debug)]
 pub struct Handle<A> {
     inner: Arc<Inner<A>>,
     waker_index: usize,
+}
+
+impl<A> Debug for Handle<A> {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let ptr = &*self.inner as *const Inner<A>;
+        write!(fmt, "Handle({:p})", ptr)
+    }
+}
+
+impl<A> Clone for Handle<A> {
+    fn clone(&self) -> Self {
+        Handle {
+            inner: self.inner.clone(),
+            waker_index: WAKER_INDEX_NULL,
+        }
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        self.inner = source.inner.clone();
+        self.waker_index = WAKER_INDEX_NULL;
+    }
 }
 
 impl<A> Handle<A>
@@ -264,10 +284,12 @@ pub(crate) struct AnyHandle {
 
 impl AnyHandle {
     pub unsafe fn downcast<A: Asset>(&self) -> Handle<A> {
-        debug_assert!(Any::is::<Handle<A>>(&self.inner));
-
-        let ptr: *const Handle<A> = &self.inner as *const dyn Any as _;
-        Clone::clone(&*ptr)
+        debug_assert!(Any::is::<Inner<A>>(&*self.inner));
+        let ptr: *const Inner<A> = Arc::into_raw(Arc::clone(&self.inner)) as *const dyn Any as _;
+        Handle {
+            inner: Arc::from_raw(ptr),
+            waker_index: WAKER_INDEX_NULL,
+        }
     }
 }
 
@@ -407,9 +429,11 @@ pub(crate) struct AnyLocalHandle {
 
 impl AnyLocalHandle {
     pub unsafe fn downcast<A: Asset>(&self) -> LocalHandle<A> {
-        debug_assert!(Any::is::<LocalHandle<A>>(&self.inner));
-
-        let ptr: *const LocalHandle<A> = &self.inner as *const dyn Any as _;
-        Clone::clone(&*ptr)
+        debug_assert!(Any::is::<LocalInner<A>>(&*self.inner));
+        let ptr: *const LocalInner<A> = Rc::into_raw(Rc::clone(&self.inner)) as *const dyn Any as _;
+        LocalHandle {
+            inner: Rc::from_raw(ptr),
+            waker_index: WAKER_INDEX_NULL,
+        }
     }
 }

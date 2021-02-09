@@ -72,8 +72,6 @@ where
     /// Try to read data for asset with specified key.
     /// This method will try to read asset from all registered sources one-by-one.
     /// Returns as soon as first source returns anything except `SourceError::NotFound`.
-    ///
-    /// This method ignores sources that return non-send futures.
     pub async fn read(&self, key: &K) -> eyre::Result<Box<[u8]>> {
         for storage in &*self.sources {
             match storage.read(&key).await {

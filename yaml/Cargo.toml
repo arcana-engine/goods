@@ -1,6 +1,6 @@
 [package]
 name = "goods-yaml"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 description = "JSON format for 'goods' asset manager"
@@ -11,7 +11,7 @@ repository = "https://github.com/zakarumych/goods-yaml"
 readme = "../README.md"
 
 [dependencies]
-goods = { version = "0.8.0", path = "../goods" }
+goods = { version = "0.9.0", path = "../goods" }
 eyre = "0.6"
 serde = { version = "1.0" }
 serde_yaml = { version = "0.8" }

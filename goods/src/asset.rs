@@ -1,8 +1,4 @@
-use std::{
-    convert::Infallible,
-    error::Error,
-    future::{ready, Future, Ready},
-};
+use std::future::{ready, Future, Ready};
 
 /// Loaded, processed and prepared asset.
 /// This trait specifies how asset instances can be built from intermediate values
@@ -10,9 +6,6 @@ use std::{
 ///
 /// [`Format`]: ./trait.Format.html
 pub trait Asset: Clone + Sized + 'static {
-    /// Error that may occur during asset building.
-    type Error: Error + Send + Sync;
-
     /// Intermediate representation type for the asset.
     /// This representation is constructed by [`Format::decode`].
     ///
@@ -28,7 +21,7 @@ pub trait Asset: Clone + Sized + 'static {
     type Context;
 
     /// Asynchronous result produced by asset building.
-    type BuildFuture: Future<Output = Result<Self, Self::Error>> + 'static;
+    type BuildFuture: Future<Output = eyre::Result<Self>> + 'static;
 
     /// Build asset instance from intermediate representation using provided context.
     fn build(repr: Self::Repr, ctx: &mut Self::Context) -> Self::BuildFuture;
@@ -38,9 +31,6 @@ pub trait Asset: Clone + Sized + 'static {
 ///
 /// [`Asset`]: ./trait.Asset.html
 pub trait SyncAsset: Clone + Sized + 'static {
-    /// Error that may occur during asset building.
-    type Error: Error + Send + Sync;
-
     /// Asset processing context.
     /// Instance of context is required to convert asset intermediate representation into asset instance.
     type Context;
@@ -52,20 +42,19 @@ pub trait SyncAsset: Clone + Sized + 'static {
     type Repr;
 
     /// Build asset instance from intermediate representation using provided context.
-    fn build(repr: Self::Repr, ctx: &mut Self::Context) -> Result<Self, Self::Error>;
+    fn build(repr: Self::Repr, ctx: &mut Self::Context) -> eyre::Result<Self>;
 }
 
 impl<S> Asset for S
 where
     S: SyncAsset,
 {
-    type Error = S::Error;
     type Repr = S::Repr;
     type Context = S::Context;
-    type BuildFuture = Ready<Result<Self, Self::Error>>;
+    type BuildFuture = Ready<eyre::Result<Self>>;
 
     #[inline]
-    fn build(repr: S::Repr, ctx: &mut S::Context) -> Ready<Result<Self, Self::Error>> {
+    fn build(repr: S::Repr, ctx: &mut S::Context) -> Ready<eyre::Result<Self>> {
         ready(S::build(repr, ctx))
     }
 }
@@ -88,12 +77,11 @@ impl<S> SyncAsset for S
 where
     S: SimpleAsset,
 {
-    type Error = Infallible;
     type Repr = Self;
     type Context = PhantomContext;
 
     #[inline]
-    fn build(repr: Self, _ctx: &mut PhantomContext) -> Result<Self, Self::Error> {
+    fn build(repr: Self, _ctx: &mut PhantomContext) -> eyre::Result<Self> {
         Ok(repr)
     }
 }

@@ -14,7 +14,7 @@ use {
 /// and [`Cache`] to load compound assets.
 ///
 /// [`Cache`]: ./struct.Cache.html
-pub trait Format<A, K>: Debug + 'static {
+pub trait Format<A, K>: Send + Debug + 'static {
     /// Decoding future.
     type DecodeFuture: Future<Output = eyre::Result<A>> + Send + 'static;
 
@@ -42,7 +42,7 @@ pub trait SimpleFormat<A, K>: Debug + 'static {
 impl<A, K, F> Format<A, K> for F
 where
     A: Send + 'static,
-    F: SimpleFormat<A, K> + 'static,
+    F: SimpleFormat<A, K> + Send + 'static,
 {
     type DecodeFuture = Ready<eyre::Result<A>>;
 
@@ -73,7 +73,7 @@ where
 /// Has no effect otherwise.
 ///
 /// [`Cache::load`]: /trait.Cache.html#tymethod.load
-pub trait AssetDefaultFormat<K>: Asset {
+pub trait AssetDefaultFormat: Asset {
     /// Format that will be used when asset is loaded using [`Cache::load`]
     ///
     /// [`Cache::load`]: /trait.Cache.html#tymethod.load
