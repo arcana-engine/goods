@@ -133,3 +133,7 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 [`tokio`]: https://tokio.rs/
 [`reqwest`]: https://docs.rs/reqwest
 [`wasm-bindgen`]: https://github.com/rustwasm/wasm-bindgen
+
+## Support me on Patreon
+
+[![Support me on Patreon](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fshieldsio-patreon.vercel.app%2Fapi%3Fusername%3Dzakarum%26type%3Dpatrons&style=for-the-badge)](https://patreon.com/zakarum)
