@@ -68,10 +68,10 @@ All out-of-the-box functionality exept core traits and types lives in their own 
 
 There are few simple examples provided to learn how use this crate.
 
-### [fs examlple](./examples/src/dataurl.rs)
+### [fs example](./examples/src/dataurl.rs)
 Shows how to build registry with [`DataUrlSource`] and load simple assets from it.
 
-### [fs examlple](./examples/src/fs.rs)
+### [fs example](./examples/src/fs.rs)
 Shows how to build registry with [`FileSource`] and load simple assets from it.
 
 ### [reqwest example](./examples/src/reqwest.rs)
