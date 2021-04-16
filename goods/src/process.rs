@@ -164,7 +164,7 @@ impl Processor {
         match lock.entry(context_type_id) {
             Entry::Occupied(mut entry) => {
                 let queue = entry.get_mut();
-                debug_assert!(Any::is::<Queue<A::Context>>(&**queue));
+                debug_assert!(<dyn Any>::is::<Queue<A::Context>>(&**queue));
                 let queue =
                     unsafe { &mut *(&mut **queue as *mut dyn Any as *mut Queue<A::Context>) };
                 queue.processes.push(process);
@@ -186,10 +186,10 @@ impl Processor {
 
         let mut lock = self.queues.lock().unwrap();
         if let Some(queue) = lock.get_mut(&context_type_id) {
-            debug_assert!(Any::is::<Queue<T>>(&**queue));
+            debug_assert!(<dyn Any>::is::<Queue<T>>(&**queue));
 
             let queue = unsafe { &mut *(&mut **queue as *mut dyn Any as *mut Queue<T>) };
-            let processes = std::mem::replace(&mut queue.processes, Vec::new());
+            let processes = std::mem::take(&mut queue.processes);
             drop(lock);
 
             for process in processes {
@@ -286,7 +286,7 @@ impl LocalProcessor {
         match lock.entry(context_type_id) {
             Entry::Occupied(mut entry) => {
                 let queue = entry.get_mut();
-                debug_assert!(Any::is::<LocalQueue<A::Context>>(&**queue));
+                debug_assert!(<dyn Any>::is::<LocalQueue<A::Context>>(&**queue));
                 let queue =
                     unsafe { &mut *(&mut **queue as *mut dyn Any as *mut LocalQueue<A::Context>) };
                 queue.processes.push(process);
@@ -308,10 +308,10 @@ impl LocalProcessor {
 
         let mut lock = self.queues.borrow_mut();
         if let Some(queue) = lock.get_mut(&context_type_id) {
-            debug_assert!(Any::is::<LocalQueue<T>>(&**queue));
+            debug_assert!(<dyn Any>::is::<LocalQueue<T>>(&**queue));
 
             let queue = unsafe { &mut *(&mut **queue as *mut dyn Any as *mut LocalQueue<T>) };
-            let processes = std::mem::replace(&mut queue.processes, Vec::new());
+            let processes = std::mem::take(&mut queue.processes);
             drop(lock);
 
             for process in processes {

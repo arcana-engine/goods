@@ -262,13 +262,11 @@ where
                         #[cfg(any(not(feature = "parking_lot"), target_arch = "wasm32"))]
                         let mut wakers = wakers.unwrap();
 
-                        std::mem::replace(&mut *wakers, Slab::new())
+                        std::mem::take(&mut *wakers)
                     };
 
-                    for waker in wakers.drain() {
-                        if let Some(waker) = waker {
-                            waker.wake()
-                        }
+                    for waker in wakers.drain().flatten() {
+                        waker.wake()
                     }
 
                     Poll::Ready(self.result_unchecked())
@@ -284,7 +282,7 @@ pub(crate) struct AnyHandle {
 
 impl AnyHandle {
     pub unsafe fn downcast<A: Asset>(&self) -> Handle<A> {
-        debug_assert!(Any::is::<Inner<A>>(&*self.inner));
+        debug_assert!(<dyn Any>::is::<Inner<A>>(&*self.inner));
         let ptr: *const Inner<A> = Arc::into_raw(Arc::clone(&self.inner)) as *const dyn Any as _;
         Handle {
             inner: Arc::from_raw(ptr),
@@ -429,7 +427,7 @@ pub(crate) struct AnyLocalHandle {
 
 impl AnyLocalHandle {
     pub unsafe fn downcast<A: Asset>(&self) -> LocalHandle<A> {
-        debug_assert!(Any::is::<LocalInner<A>>(&*self.inner));
+        debug_assert!(<dyn Any>::is::<LocalInner<A>>(&*self.inner));
         let ptr: *const LocalInner<A> = Rc::into_raw(Rc::clone(&self.inner)) as *const dyn Any as _;
         LocalHandle {
             inner: Rc::from_raw(ptr),
