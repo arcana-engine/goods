@@ -13,9 +13,9 @@ readme = "../README.md"
 [dependencies]
 eyre = "0.6"
 goods = { version = "0.9.0", path = "../goods" }
-wasm-bindgen = { version = "=0.2.70" }
-wasm-bindgen-futures = { version = "=0.4.20" }
-web-sys = { version = "=0.3.47", features = ["Response", "Window"] }
-js-sys = { version = "=0.3.47" }
+wasm-bindgen = { version = "=0.2.73" }
+wasm-bindgen-futures = { version = "=0.4.23" }
+web-sys = { version = "=0.3.50", features = ["Response", "Window"] }
+js-sys = { version = "=0.3.50" }
 futures-core = { version = "0.3" }
-spin = { version = "0.7" }
+spin = { version = "0.9" }
