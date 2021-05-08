@@ -1,0 +1,21 @@
+[package]
+name = "reliquary"
+version = "0.1.0"
+edition = "2018"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/reliquary/0.1.0"
+homepage = "https://github.com/zaq/reliquary"
+repository = "https://github.com/zaq/reliquary"
+
+[dependencies]
+reliquary-import = { version = "=0.1.0", path = "import" }
+tracing = { version = "0.1", features = ["attributes"] }
+uuid = { version = "0.8", features = ["v4", "serde"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
+bincode = "1.0"
+thiserror = "1.0"
+dlopen = "0.1"
+
+[workspace]
+members = ["dummy", "relictl"]

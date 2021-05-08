@@ -1,0 +1,17 @@
+[package]
+name = "relictl"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+reliquary = { version = "=0.1.0", path = ".." }
+clap = "3.0.0-beta.2"
+tracing = "0.1"
+tracing-error = "0.1"
+tracing-subscriber = "0.2"
+eyre = "0.6"
+color-eyre = "0.5"
+uuid = { version = "0.8" }

@@ -1,0 +1,11 @@
+[package]
+name = "reliquary-import"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+
+[dependencies]
+uuid = { version = "0.8" }
+
+[build-dependencies]
+rustc_version = "0.3"
