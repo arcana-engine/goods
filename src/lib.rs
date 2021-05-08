@@ -6,11 +6,19 @@
 //!
 //! TODO: Ability to archive selected assets
 //!
+//!
+//! [`relictl`] - CLI tool can be used to create reliquary instances, register assets and checks loading-importing process.
+//!
+//! [dummy]: https://github.com/zakarumych/reliquary/tree/master/dummy
+//! [`relictl`]: https://github.com/zakarumych/reliquary/tree/master/relictl
 
 use {
-    reliquary_import::{reliquary_import_version, Importer, Registrar},
+    reliquary_import::{reliquary_import_version, Importer},
     std::{
-        collections::{HashMap, HashSet},
+        collections::{
+            hash_map::{Entry, HashMap},
+            HashSet,
+        },
         error::Error,
         io::Read,
         path::{Path, PathBuf},
@@ -59,6 +67,7 @@ struct Registry {
     sources_root: Arc<Path>,
     natives_root: Arc<Path>,
     relics: Vec<Relic>,
+    importer_dirs: HashSet<PathBuf>,
 
     #[serde(skip)]
     tags: HashSet<Arc<str>>,
@@ -81,13 +90,14 @@ pub enum SaveError {
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
     #[error("Failed to open reliquary file")]
-    IoError(#[source] std::io::Error),
+    ReliquaryFile(#[source] std::io::Error),
+
     #[error("Failed to deserialize reliquary file")]
     BincodeError(#[source] bincode::Error),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum LoadError {
+pub enum FetchError {
     #[error("Relic not found")]
     NotFound,
 
@@ -118,6 +128,7 @@ impl Reliquary {
                 sources_root: sources.as_ref().canonicalize()?.into(),
                 natives_root: natives.as_ref().canonicalize()?.into(),
                 relics: Vec::new(),
+                importer_dirs: HashSet::new(),
                 relics_by_source: HashMap::new(),
                 relics_by_uuid: HashMap::new(),
                 tags: HashSet::new(),
@@ -126,20 +137,20 @@ impl Reliquary {
         })
     }
 
-    #[tracing::instrument(skip(self, lib_path), fields(lib_path = %lib_path.as_ref().display()))]
-    pub fn load_importers(&mut self, lib_path: impl AsRef<Path>) -> Result<(), LoadImportersError> {
-        load_importers(&mut self.importers, lib_path.as_ref())
-    }
-
     #[tracing::instrument(skip(self, dir_path), fields(dir_path = %dir_path.as_ref().display()))]
-    pub fn load_importers_dir(&mut self, dir_path: impl AsRef<Path>) -> std::io::Result<()> {
-        load_importers_dir(&mut self.importers, dir_path.as_ref())
+    pub fn load_importers(&mut self, dir_path: impl AsRef<Path>) -> std::io::Result<()> {
+        let dir_path = dir_path.as_ref();
+        if !self.registry.importer_dirs.contains(dir_path) {
+            load_importers_dir(&mut self.importers, dir_path)?;
+            self.registry.importer_dirs.insert(dir_path.into());
+        }
+        Ok(())
     }
 
     /// Opens reliquary from file.
     #[tracing::instrument(skip(path), fields(path = %path.as_ref().display()))]
     pub fn open(path: impl AsRef<Path>) -> Result<Self, OpenError> {
-        let file = std::fs::File::open(path).map_err(OpenError::IoError)?;
+        let file = std::fs::File::open(path).map_err(OpenError::ReliquaryFile)?;
         let mut registry: Registry =
             bincode::deserialize_from(file).map_err(OpenError::BincodeError)?;
 
@@ -168,12 +179,17 @@ impl Reliquary {
             .map(|(index, info)| (info.source.clone(), index))
             .collect();
 
-        let me = Reliquary {
-            registry,
-            importers: HashMap::new(),
-        };
+        let mut importers = HashMap::new();
+        for dir_path in &registry.importer_dirs {
+            if let Err(err) = load_importers_dir(&mut importers, dir_path) {
+                tracing::error!("Failed to scan importers dir: {:#}", err);
+            }
+        }
 
-        Ok(me)
+        Ok(Reliquary {
+            registry,
+            importers,
+        })
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> Result<(), SaveError> {
@@ -182,7 +198,7 @@ impl Reliquary {
     }
 
     /// Registers asset in this reliquary
-    pub fn register(
+    pub fn store(
         &mut self,
         source: impl AsRef<Path>,
         importer: &str,
@@ -191,19 +207,19 @@ impl Reliquary {
         self.registry.register(source, importer, tags)
     }
 
-    /// Loads asset in native format.
+    /// Fetches asset in native format.
     /// Performs conversion if native format is absent or out of date.
     #[tracing::instrument(skip(self))]
-    pub fn load(&mut self, uuid: Uuid) -> Result<Box<[u8]>, LoadError> {
+    pub fn fetch(&mut self, uuid: Uuid) -> Result<Box<[u8]>, FetchError> {
         match self.registry.relics_by_uuid.get(&uuid) {
-            None => Err(LoadError::NotFound),
+            None => Err(FetchError::NotFound),
             Some(&index) => {
                 let relic = &self.registry.relics[index];
 
                 let source_path = self.registry.sources_root.join(&relic.source);
 
                 let source_file =
-                    std::fs::File::open(&source_path).map_err(LoadError::SourceIoError)?;
+                    std::fs::File::open(&source_path).map_err(FetchError::SourceIoError)?;
 
                 match &relic.native {
                     Some(native) => {
@@ -212,22 +228,22 @@ impl Reliquary {
                         let source_modified = source_file
                             .metadata()
                             .and_then(|m| m.modified())
-                            .map_err(LoadError::SourceIoError)?;
+                            .map_err(FetchError::SourceIoError)?;
 
                         let mut native_file =
-                            std::fs::File::open(&native_path).map_err(LoadError::NativeIoError)?;
+                            std::fs::File::open(&native_path).map_err(FetchError::NativeIoError)?;
 
                         let native_modifier = native_file
                             .metadata()
                             .and_then(|m| m.modified())
-                            .map_err(LoadError::NativeIoError)?;
+                            .map_err(FetchError::NativeIoError)?;
 
                         if native_modifier >= source_modified {
                             tracing::trace!("Native asset file is up-to-date");
                             let mut native_data = Vec::new();
                             native_file
                                 .read_to_end(&mut native_data)
-                                .map_err(LoadError::NativeIoError)?;
+                                .map_err(FetchError::NativeIoError)?;
 
                             return Ok(native_data.into_boxed_slice());
                         }
@@ -239,7 +255,7 @@ impl Reliquary {
                                 let mut native_data = Vec::new();
                                 native_file
                                     .read_to_end(&mut native_data)
-                                    .map_err(LoadError::NativeIoError)?;
+                                    .map_err(FetchError::NativeIoError)?;
                                 Ok(native_data.into_boxed_slice())
                             }
 
@@ -255,7 +271,7 @@ impl Reliquary {
                                         tracing::trace!("Native file updated");
 
                                         std::fs::rename(&native_path_tmp, &native_path)
-                                            .map_err(LoadError::NativeIoError)?;
+                                            .map_err(FetchError::NativeIoError)?;
 
                                         let relic = &mut self.registry.relics[index];
                                         relic.version += 1;
@@ -267,7 +283,7 @@ impl Reliquary {
                                     }
                                 }
                                 Ok(std::fs::read(&native_path)
-                                    .map_err(LoadError::NativeIoError)?
+                                    .map_err(FetchError::NativeIoError)?
                                     .into_boxed_slice())
                             }
                         }
@@ -275,7 +291,7 @@ impl Reliquary {
                     None => {
                         tracing::trace!("Native asset file is absent. Import is required");
                         match self.importers.get(&*relic.importer) {
-                            None => Err(LoadError::ImporterNotFound),
+                            None => Err(FetchError::ImporterNotFound),
 
                             Some(importer) => {
                                 let native = relic.uuid.to_hyphenated().to_string();
@@ -286,15 +302,15 @@ impl Reliquary {
                                 importer
                                     .importer
                                     .import(&source_path, &native_path_tmp, &mut self.registry)
-                                    .map_err(LoadError::ImporterError)?;
+                                    .map_err(FetchError::ImporterError)?;
 
                                 tracing::trace!("Native file imported");
 
                                 std::fs::rename(&native_path_tmp, &native_path)
-                                    .map_err(LoadError::NativeIoError)?;
+                                    .map_err(FetchError::NativeIoError)?;
 
                                 let data = std::fs::read(&native_path)
-                                    .map_err(LoadError::NativeIoError)?
+                                    .map_err(FetchError::NativeIoError)?
                                     .into_boxed_slice();
 
                                 let relic = &mut self.registry.relics[index];
@@ -353,8 +369,8 @@ impl Registry {
     }
 }
 
-impl Registrar for Registry {
-    fn register(
+impl reliquary_import::Reliquary for Registry {
+    fn store(
         &mut self,
         source: &Path,
         importer: &str,
@@ -458,14 +474,22 @@ fn load_importers(
                 } {
                     Ok(get_reliquary_importers) => {
                         for importer in get_reliquary_importers() {
-                            importers.insert(
-                                importer.name().into(),
-                                ImporterEntry {
-                                    importer,
-                                    _lib: lib.clone(),
-                                },
-                            );
+                            match importers.entry(importer.name().into()) {
+                                Entry::Vacant(entry) => {
+                                    entry.insert(ImporterEntry {
+                                        importer,
+                                        _lib: lib.clone(),
+                                    });
+                                }
+                                Entry::Occupied(_) => {
+                                    tracing::warn!(
+                                        "Duplicate importer name '{}'. Importer skipped",
+                                        importer.name()
+                                    );
+                                }
+                            }
                         }
+                        tracing::info!("Added importers from {}", lib_path.display());
                         Ok(())
                     }
                     Err(err) => {

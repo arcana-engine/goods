@@ -4,9 +4,9 @@ use {
 };
 
 /// Object to register sub-assets when importing super-asset.
-pub trait Registrar {
+pub trait Reliquary {
     /// Register sub-asset at source path, assigning specified importer.
-    fn register(
+    fn store(
         &mut self,
         source: &Path,
         importer: &str,
@@ -23,7 +23,7 @@ pub trait Importer {
         &self,
         source_path: &Path,
         native_path: &Path,
-        registrar: &mut dyn Registrar,
+        registrar: &mut dyn Reliquary,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
 

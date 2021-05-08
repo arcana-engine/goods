@@ -1,5 +1,5 @@
 use {
-    reliquary_import::{Importer, Registrar},
+    reliquary_import::{Importer, Reliquary},
     std::{error::Error, path::Path},
 };
 
@@ -42,7 +42,7 @@ impl Importer for DummyImporter {
         &self,
         source_path: &Path,
         native_path: &Path,
-        _registrar: &mut dyn Registrar,
+        _reliquary: &mut dyn Reliquary,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // This simply creates hard-link on most platforms.
         match std::fs::copy(source_path, native_path) {
