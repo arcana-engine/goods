@@ -4,7 +4,7 @@ use {
 };
 
 /// Object to register sub-assets when importing super-asset.
-pub trait Reliquary {
+pub trait Registry {
     /// Register sub-asset at source path, assigning specified importer.
     fn store(
         &mut self,
@@ -13,7 +13,7 @@ pub trait Reliquary {
     ) -> Result<Uuid, Box<dyn Error + Send + Sync>>;
 }
 
-pub trait Importer {
+pub trait Importer: Send + Sync {
     /// Returns name of the importer
     fn name(&self) -> &str;
 
@@ -23,19 +23,19 @@ pub trait Importer {
         &self,
         source_path: &Path,
         native_path: &Path,
-        registrar: &mut dyn Reliquary,
+        registry: &mut dyn Registry,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
 
-/// Magic number to export as `reliquary_import_magic_number` in importer library.
+/// Magic number to export as `goods_import_magic_number` in importer library.
 pub const MAGIC: u32 = 0xe11c9a87;
 
 /// Returns combination of rustc version and this crate version.
-/// Must be used in `get_reliquary_import_version` function exported by importer libraries.
-pub fn reliquary_import_version() -> &'static str {
+/// Must be used in `get_goods_import_version` function exported by importer libraries.
+pub fn goods_import_version() -> &'static str {
     concat!(
         env!("CARGO_PKG_VERSION"),
         "@",
-        env!("RELIQUARY_IMPORT_RUSTC_VERSION")
+        env!("GOODS_IMPORT_RUSTC_VERSION")
     )
 }

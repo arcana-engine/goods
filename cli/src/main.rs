@@ -1,11 +1,11 @@
-use {clap::Clap, reliquary::Reliquary, tracing_subscriber::layer::SubscriberExt as _, uuid::Uuid};
+use {clap::Clap, goods::Goods, tracing_subscriber::layer::SubscriberExt as _, uuid::Uuid};
 
 #[derive(Clap)]
 #[clap(version = "0.1", author = "Zakarum <zakarumych@ya.ru>")]
 struct Opts {
-    /// Reliquary info file path
-    #[clap(short, long, default_value = "reliquary.bin")]
-    reliquary: String,
+    /// Goods info file path
+    #[clap(short, long, default_value = "goods.bin")]
+    goods: String,
 
     /// A level of verbosity, and can be used multiple times
     #[clap(short, long, parse(from_occurrences))]
@@ -86,32 +86,30 @@ fn main() -> eyre::Result<()> {
 
     match opts.subcmd {
         SubCommand::Create(create) => {
-            let mut reliquary = Reliquary::new(&create.sources, &create.natives)?;
-            reliquary.load_importers(&create.importers_dir)?;
-            reliquary.save(&opts.reliquary)?;
-            println!("New reliquary created at '{}'", opts.reliquary)
+            let mut goods = Goods::new(&create.sources, &create.natives)?;
+            goods.load_importers(&create.importers_dir)?;
+            goods.save(&opts.goods)?;
+            println!("New goods created at '{}'", opts.goods)
         }
         SubCommand::Update(update) => {
-            let mut reliquary = Reliquary::open(&opts.reliquary)?;
-            reliquary.load_importers(&update.importers_dir)?;
-            reliquary.save(&opts.reliquary)?;
-            println!("Reliquary at '{}' updated", opts.reliquary)
+            let mut goods = Goods::open(&opts.goods)?;
+            goods.load_importers(&update.importers_dir)?;
+            goods.save(&opts.goods)?;
+            println!("Goods at '{}' updated", opts.goods)
         }
         SubCommand::Store(register) => {
-            let mut reliquary = Reliquary::open(&opts.reliquary)?;
-            let uuid = reliquary.store(register.source_path, &register.importer, &[])?;
-            reliquary.save(&opts.reliquary)?;
-            println!("New relic registered as '{}'", uuid);
+            let mut goods = Goods::open(&opts.goods)?;
+            let uuid = goods.store(register.source_path, &register.importer, &[])?;
+            goods.save(&opts.goods)?;
+            println!("New asset registered as '{}'", uuid);
         }
         SubCommand::Fetch(load) => {
-            let mut reliquary = Reliquary::open(&opts.reliquary)?;
-            let data = reliquary.fetch(load.uuid)?;
-            reliquary.save(&opts.reliquary)?;
-            println!("Relic loaded. Size: {}", data.len());
+            let mut goods = Goods::open(&opts.goods)?;
+            let data = goods.fetch(&load.uuid)?;
+            goods.save(&opts.goods)?;
+            println!("Asset loaded. Size: {}", data.bytes.len());
         }
     }
-
-    // let reliquary = Reliquary::open("reliquary.info").unwrap();
 
     Ok(())
 }

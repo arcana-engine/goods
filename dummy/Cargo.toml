@@ -6,7 +6,7 @@ edition = "2018"
 publish = false
 
 [lib]
-crate-type = ["dylib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-reliquary-import = { path = "../import" }
+goods-import = { path = "../import" }

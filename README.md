@@ -1,14 +1,14 @@
-# reliquary
+# goods
 
-[![crates](https://img.shields.io/crates/v/reliquary.svg?style=for-the-badge&label=reliquary)](https://crates.io/crates/reliquary)
-[![docs](https://img.shields.io/badge/docs.rs-reliquary-66c2a5?style=for-the-badge&labelColor=555555&logoColor=white)](https://docs.rs/reliquary)
-[![actions](https://img.shields.io/github/workflow/status/zakarumych/reliquary/badge/master?style=for-the-badge)](https://github.com/zakarumych/reliquary/actions?query=workflow%3ARust)
+[![crates](https://img.shields.io/crates/v/goods.svg?style=for-the-badge&label=goods)](https://crates.io/crates/goods)
+[![docs](https://img.shields.io/badge/docs.rs-goods-66c2a5?style=for-the-badge&labelColor=555555&logoColor=white)](https://docs.rs/goods)
+[![actions](https://img.shields.io/github/workflow/status/zakarumych/goods/badge/master?style=for-the-badge)](https://github.com/zakarumych/goods/actions?query=workflow%3ARust)
 [![MIT/Apache](https://img.shields.io/badge/license-MIT%2FApache-blue.svg?style=for-the-badge)](COPYING)
-![loc](https://img.shields.io/tokei/lines/github/zakarumych/reliquary?style=for-the-badge)
+![loc](https://img.shields.io/tokei/lines/github/zakarumych/goods?style=for-the-badge)
 
 
-Reliquary helps keeping asset importing code away from app and
-address assets with uuids instead of error-prone file paths.
+`Goods` is asset pipeline that helps keeping asset importing code away from the app\
+and address assets with uuids instead of error-prone file paths and urls.
 
 TODO: Ability to archive selected assets
 

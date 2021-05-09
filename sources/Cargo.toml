@@ -1,0 +1,11 @@
+[package]
+name = "goods-sources"
+version = "0.1.0"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+edition = "2018"
+
+[dependencies]
+goods = { version = "0.9", path = ".." }
+goods-loader = { version = "0.1", path = "../loader" }
+thiserror = "1.0"
+uuid = "0.8"
