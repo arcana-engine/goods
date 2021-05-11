@@ -9,7 +9,7 @@ name = "treasury"
 path = "src/main.rs"
 
 [dependencies]
-treasury = { version = "0.1.0", path = ".." }
+treasury = { version = "0.1.0", path = "../treasury" }
 clap = "3.0.0-beta.2"
 tracing = "0.1"
 tracing-error = "0.1"
