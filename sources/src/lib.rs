@@ -2,32 +2,24 @@ use {
     goods::Goods,
     goods_loader::{AssetData, Source},
     std::{
-        error::Error,
         future::{ready, Ready},
+        path::Path,
     },
     uuid::Uuid,
 };
 
 #[derive(Debug, thiserror::Error)]
-pub enum GoodsError {
-    #[error("Importer not found for the asset")]
-    ImporterNotFound,
-
-    #[error("Import failed")]
-    ImporterError(#[source] Box<dyn Error + Send + Sync>),
-
-    #[error("Failed to access source file")]
-    SourceIoError(#[source] std::io::Error),
-
-    #[error("Failed to access native file")]
-    NativeIoError(#[source] std::io::Error),
+#[error("Failed to access native file '{path}'")]
+pub struct GoodsFetchError {
+    path: Box<Path>,
+    source: std::io::Error,
 }
 
 pub struct GoodsSource(Goods);
 
 impl Source for GoodsSource {
-    type Error = GoodsError;
-    type Fut = Ready<Result<Option<AssetData>, GoodsError>>;
+    type Error = GoodsFetchError;
+    type Fut = Ready<Result<Option<AssetData>, GoodsFetchError>>;
 
     fn load(&self, uuid: &Uuid) -> Self::Fut {
         let result = match self.0.fetch_frozen(uuid) {
@@ -37,10 +29,9 @@ impl Source for GoodsSource {
                 version: asset_data.version,
             })),
             Err(goods::FetchError::NotFound) => Ok(None),
-            Err(goods::FetchError::ImporterNotFound) => Err(GoodsError::ImporterNotFound),
-            Err(goods::FetchError::ImporterError(err)) => Err(GoodsError::ImporterError(err)),
-            Err(goods::FetchError::SourceIoError(err)) => Err(GoodsError::SourceIoError(err)),
-            Err(goods::FetchError::NativeIoError(err)) => Err(GoodsError::NativeIoError(err)),
+            Err(goods::FetchError::NativeIoError { source, path }) => {
+                Err(GoodsFetchError { source, path })
+            }
         };
         ready(result)
     }

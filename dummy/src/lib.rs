@@ -1,6 +1,6 @@
 use {
     goods_import::{Importer, Registry},
-    std::{error::Error, path::Path},
+    std::{error::Error, path::Path, sync::Arc},
 };
 
 /// This is required to minimize chances that random shared library
@@ -19,8 +19,8 @@ pub fn get_goods_import_version() -> &'static str {
 
 /// Returns array of importers from this library.
 #[no_mangle]
-pub fn get_goods_importers() -> Vec<Box<dyn Importer>> {
-    vec![Box::new(DummyImporter)]
+pub fn get_goods_importers() -> Vec<Arc<dyn Importer>> {
+    vec![Arc::new(DummyImporter)]
 }
 
 /// Dummy importer that imports assets as-is.

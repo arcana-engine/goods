@@ -3,9 +3,9 @@ use {clap::Clap, goods::Goods, tracing_subscriber::layer::SubscriberExt as _, uu
 #[derive(Clap)]
 #[clap(version = "0.1", author = "Zakarum <zakarumych@ya.ru>")]
 struct Opts {
-    /// Goods info file path
-    #[clap(short, long, default_value = "goods.bin")]
-    goods: String,
+    /// Goods root directory path
+    #[clap(short, long, default_value = ".")]
+    root: String,
 
     /// A level of verbosity, and can be used multiple times
     #[clap(short, long, parse(from_occurrences))]
@@ -25,12 +25,6 @@ enum SubCommand {
 
 #[derive(Clap)]
 struct Create {
-    #[clap(short, long)]
-    sources: String,
-
-    #[clap(short, long)]
-    natives: String,
-
     #[clap(short, long, default_value = ".")]
     importers_dir: String,
 }
@@ -56,6 +50,10 @@ struct Store {
 /// A subcommand for registering assets
 #[derive(Clap)]
 struct Fetch {
+    /// Output binary or too long data
+    #[clap(short, long)]
+    binary: bool,
+
     /// Path to asset source file.
     #[clap()]
     uuid: Uuid,
@@ -86,28 +84,46 @@ fn main() -> eyre::Result<()> {
 
     match opts.subcmd {
         SubCommand::Create(create) => {
-            let mut goods = Goods::new(&create.sources, &create.natives)?;
+            let mut goods = Goods::new(&opts.root, false)?;
             goods.load_importers(&create.importers_dir)?;
-            goods.save(&opts.goods)?;
-            println!("New goods created at '{}'", opts.goods)
+            goods.save()?;
+            println!("New goods created at '{}'", opts.root)
         }
         SubCommand::Update(update) => {
-            let mut goods = Goods::open(&opts.goods)?;
+            let mut goods = Goods::open(&opts.root)?;
             goods.load_importers(&update.importers_dir)?;
-            goods.save(&opts.goods)?;
-            println!("Goods at '{}' updated", opts.goods)
+            goods.save()?;
+            println!("Goods at '{}' updated", opts.root)
         }
         SubCommand::Store(register) => {
-            let mut goods = Goods::open(&opts.goods)?;
+            let mut goods = Goods::open(&opts.root)?;
             let uuid = goods.store(register.source_path, &register.importer, &[])?;
-            goods.save(&opts.goods)?;
+            goods.save()?;
             println!("New asset registered as '{}'", uuid);
         }
-        SubCommand::Fetch(load) => {
-            let mut goods = Goods::open(&opts.goods)?;
-            let data = goods.fetch(&load.uuid)?;
-            goods.save(&opts.goods)?;
+        SubCommand::Fetch(fetch) => {
+            let mut goods = Goods::open(&opts.root)?;
+            let data = goods.fetch(&fetch.uuid)?;
+            goods.save()?;
             println!("Asset loaded. Size: {}", data.bytes.len());
+
+            if fetch.binary {
+                let stdout = std::io::stdout();
+                std::io::Write::write_all(&mut stdout.lock(), &data.bytes)?;
+            } else {
+                if data.bytes.len() < 1024 {
+                    match std::str::from_utf8(&data.bytes) {
+                        Ok(data) => {
+                            println!("{}", data);
+                        }
+                        Err(err) => {
+                            eprintln!("Data is not UTF-8. {:#}", err);
+                        }
+                    }
+                } else {
+                    eprintln!("Data is too long");
+                }
+            }
         }
     }
 

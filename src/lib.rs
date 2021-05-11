@@ -24,6 +24,7 @@ use {
         io::Read,
         path::{Path, PathBuf},
         sync::Arc,
+        time::SystemTime,
     },
     uuid::Uuid,
 };
@@ -34,67 +35,139 @@ struct Asset {
     /// Id of the asset.
     uuid: Uuid,
 
-    /// Asset version
-    /// Incremented with each reimport.
-    version: u64,
-
     /// Path to source file.
+    /// Relative to root path.
     source: Arc<Path>,
 
     /// Importer for the asset.
     importer: Arc<str>,
 
-    /// Path to native file.
-    native: Option<Arc<Path>>,
-
     /// Arrays of tags associated with the asset.
     tags: Box<[Arc<str>]>,
+
+    #[serde(skip, default = "default_absolute_path_arc")]
+    native_absolute: Arc<Path>,
+
+    /// Path to source file.
+    #[serde(skip, default = "default_absolute_path_arc")]
+    source_absolute: Arc<Path>,
 }
 
 /// Storage for goods.
 pub struct Goods {
-    registry: Registry,
+    inner: Inner,
+}
+
+struct Inner {
+    /// All paths not suffixed with `_absolute` are relative to this.
+    root: Box<Path>,
+
+    // Data loaded from `root.join(".goods")`.
+    data: GoodsData,
+
+    /// Set of all tags.
+    tags: HashSet<Arc<str>>,
+
+    /// Lookup assets by uuid.
+    assets_by_uuid: HashMap<Uuid, usize>,
+
+    /// Lookup assets by source path and importer name combination.
+    assets_by_source_importer: HashMap<(Arc<Path>, Arc<str>), usize>,
+
+    /// Importers
     importers: HashMap<Box<str>, ImporterEntry>,
 }
 
 struct ImporterEntry {
-    importer: Box<dyn Importer>,
+    importer: Arc<dyn Importer>,
     _lib: Arc<dlopen::raw::Library>,
 }
 
-/// Storage for goods.
 #[derive(serde::Serialize, serde::Deserialize)]
-struct Registry {
-    sources_root: Arc<Path>,
-    natives_root: Arc<Path>,
+struct GoodsData {
+    /// Set of paths to directories from where importer libraries are loaded.
+    importer_dirs: HashSet<Box<Path>>,
+
+    /// Array with all registered assets.
     assets: Vec<Asset>,
-    importer_dirs: HashSet<PathBuf>,
+}
 
-    #[serde(skip)]
-    tags: HashSet<Arc<str>>,
+#[derive(Debug, thiserror::Error)]
+pub enum NewError {
+    #[error("Goods path '{path}' is occupied")]
+    GoodsAlreadyExist { path: Box<Path> },
 
-    #[serde(skip)]
-    assets_by_uuid: HashMap<Uuid, usize>,
+    #[error("Goods path '{path}' is invalid")]
+    InvalidGoodsPath { path: Box<Path> },
 
-    #[serde(skip)]
-    assets_by_source: HashMap<Arc<Path>, usize>,
+    #[error("Failed to canonicalize root directory '{path}'")]
+    RootDirCanonError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
+
+    #[error("Failed to create root directory '{path}'")]
+    RootDirCreateError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
+
+    #[error("Root '{path}' is not a directory")]
+    RootIsNotDir { path: Box<Path> },
+
+    #[error(transparent)]
+    SaveError(#[from] SaveError),
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum SaveError {
-    #[error("Failed to save goods file")]
-    IoError(#[source] std::io::Error),
-    #[error("Failed to serialize goods file")]
-    BincodeError(#[source] bincode::Error),
+    #[error("Failed to open goods path '{path}'")]
+    GoodsOpenError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
+
+    #[error("Failed to deserialize goods file")]
+    BincodeError {
+        path: Box<Path>,
+        source: bincode::Error,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum OpenError {
-    #[error("Failed to open goods file")]
-    GoodsFile(#[source] std::io::Error),
+    #[error("Goods path '{path}' is invalid")]
+    InvalidGoodsPath { path: Box<Path> },
+
+    #[error("Failed to canonicalize root directory '{path}'")]
+    RootDirCanonError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
+
+    #[error("Failed to open goods path '{path}'")]
+    GoodsOpenError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
 
     #[error("Failed to deserialize goods file")]
-    BincodeError(#[source] bincode::Error),
+    BincodeError {
+        path: Box<Path>,
+        source: bincode::Error,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ImportError {
+    #[error("Failed to run importer library")]
+    ImporterLibraryRunError { source: std::io::Error },
+
+    #[error("Importer library returned error")]
+    ImporterLibraryError { stderr: String },
+
+    #[error("Failed to parse importer response")]
+    ImporterLibraryResponseParseError { source: serde_json::Error },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -102,23 +175,34 @@ pub enum FetchError {
     #[error("Asset not found")]
     NotFound,
 
-    #[error("Importer not found for the asset")]
-    ImporterNotFound,
-
-    #[error("Import failed")]
-    ImporterError(#[source] Box<dyn Error + Send + Sync>),
-
-    #[error("Failed to access source file")]
-    SourceIoError(#[source] std::io::Error),
-
-    #[error("Failed to access native file")]
-    NativeIoError(#[source] std::io::Error),
+    #[error("Failed to access native file '{path}'")]
+    NativeIoError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum RegisterError {
-    #[error("Failed to access source file")]
-    SourceIoError(#[source] std::io::Error),
+pub enum StoreError {
+    #[error("Failed to find importer '{importer}'")]
+    ImporterNotFound { importer: String },
+
+    #[error("Import failed")]
+    ImportError {
+        source: Box<dyn Error + Send + Sync>,
+    },
+
+    #[error("Failed to access source file '{path}'")]
+    SourceIoError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
+
+    #[error("Failed to access native file '{path}'")]
+    NativeIoError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
 }
 
 pub struct AssetData {
@@ -126,91 +210,211 @@ pub struct AssetData {
     pub version: u64,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to scan importers directory '{path}'")]
+pub struct ImporterDirError {
+    path: Box<Path>,
+    source: std::io::Error,
+}
+
 impl Goods {
-    #[tracing::instrument(skip(sources, natives), fields(sources = %sources.as_ref().display(), natives = %natives.as_ref().display()))]
-    pub fn new(sources: impl AsRef<Path>, natives: impl AsRef<Path>) -> std::io::Result<Self> {
-        Ok(Goods {
-            registry: Registry {
-                sources_root: sources.as_ref().canonicalize()?.into(),
-                natives_root: natives.as_ref().canonicalize()?.into(),
-                assets: Vec::new(),
-                importer_dirs: HashSet::new(),
-                assets_by_source: HashMap::new(),
+    /// Create new goods storage.
+    #[tracing::instrument(fields(root = %root.as_ref().display()))]
+    pub fn new(root: impl AsRef<Path>, overwrite: bool) -> Result<Self, NewError> {
+        let root = root.as_ref();
+
+        if !root.exists() {
+            std::fs::create_dir_all(&root).map_err(|source| NewError::RootDirCreateError {
+                source,
+                path: root.into(),
+            })?;
+        } else if !root.is_dir() {
+            return Err(NewError::RootIsNotDir { path: root.into() });
+        }
+
+        let root = root
+            .canonicalize()
+            .map_err(|source| NewError::RootDirCanonError {
+                source,
+                path: root.into(),
+            })?;
+
+        let goods_path = root.join(".goods");
+
+        if !overwrite && goods_path.exists() {
+            return Err(NewError::GoodsAlreadyExist {
+                path: goods_path.into(),
+            });
+        }
+
+        if overwrite && !goods_path.is_file() {
+            return Err(NewError::GoodsAlreadyExist {
+                path: goods_path.into(),
+            });
+        }
+
+        let goods = Goods {
+            inner: Inner {
+                root: root.into(),
+                assets_by_source_importer: HashMap::new(),
                 assets_by_uuid: HashMap::new(),
                 tags: HashSet::new(),
+                importers: HashMap::new(),
+                data: GoodsData {
+                    assets: Vec::new(),
+                    importer_dirs: HashSet::new(),
+                },
             },
-            importers: HashMap::new(),
-        })
+        };
+
+        let file =
+            std::fs::File::create(&goods_path).map_err(|source| SaveError::GoodsOpenError {
+                source,
+                path: goods_path.clone().into(),
+            })?;
+
+        bincode::serialize_into(file, &goods.inner.data).map_err(|source| {
+            SaveError::BincodeError {
+                source,
+                path: goods_path.clone().into(),
+            }
+        })?;
+
+        Ok(goods)
     }
 
-    #[tracing::instrument(skip(self, dir_path), fields(dir_path = %dir_path.as_ref().display()))]
-    pub fn load_importers(&mut self, dir_path: impl AsRef<Path>) -> std::io::Result<()> {
-        let dir_path = dir_path.as_ref();
-        if !self.registry.importer_dirs.contains(dir_path) {
-            load_importers_dir(&mut self.importers, dir_path)?;
-            self.registry.importer_dirs.insert(dir_path.into());
-        }
-        Ok(())
-    }
+    /// Opens goods storage from metadata file.
+    #[tracing::instrument(skip(root), fields(root = %root.as_ref().display()))]
+    pub fn open(root: impl AsRef<Path>) -> Result<Self, OpenError> {
+        let root = root.as_ref();
 
-    /// Opens goods from file.
-    #[tracing::instrument(skip(path), fields(path = %path.as_ref().display()))]
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, OpenError> {
-        let file = std::fs::File::open(path).map_err(OpenError::GoodsFile)?;
-        let mut registry: Registry =
-            bincode::deserialize_from(file).map_err(OpenError::BincodeError)?;
+        let root = root
+            .canonicalize()
+            .map_err(|source| OpenError::RootDirCanonError {
+                source,
+                path: root.into(),
+            })?;
 
-        for asset in &mut registry.assets {
+        let goods_path = root.join(".goods");
+
+        let file =
+            std::fs::File::open(&goods_path).map_err(|source| OpenError::GoodsOpenError {
+                source,
+                path: goods_path.clone().into(),
+            })?;
+
+        let mut data: GoodsData =
+            bincode::deserialize_from(file).map_err(|source| OpenError::BincodeError {
+                source,
+                path: goods_path.clone().into(),
+            })?;
+
+        let mut tags = HashSet::<Arc<str>>::new();
+        for asset in &mut data.assets {
             for tag in &mut *asset.tags {
-                match registry.tags.get(&**tag) {
+                match tags.get(&**tag) {
                     Some(t) => *tag = t.clone(),
                     None => {
-                        registry.tags.insert(tag.clone());
+                        tags.insert(tag.clone());
                     }
                 }
             }
+
+            asset.source_absolute = root.join(&asset.source).into();
+            asset.native_absolute = root.join(asset.uuid.to_hyphenated().to_string()).into();
         }
 
-        registry.assets_by_uuid = registry
+        let assets_by_uuid = data
             .assets
             .iter()
             .enumerate()
-            .map(|(index, info)| (info.uuid, index))
+            .map(|(index, asset)| (asset.uuid, index))
             .collect();
 
-        registry.assets_by_source = registry
+        let assets_by_source_importer = data
             .assets
             .iter()
             .enumerate()
-            .map(|(index, info)| (info.source.clone(), index))
+            .map(|(index, asset)| ((asset.source.clone(), asset.importer.clone()), index))
             .collect();
 
         let mut importers = HashMap::new();
-        for dir_path in &registry.importer_dirs {
-            if let Err(err) = load_importers_dir(&mut importers, dir_path) {
+        for dir_path in &data.importer_dirs {
+            if let Err(err) = load_importers_dir(&mut importers, &root.join(dir_path)) {
                 tracing::error!("Failed to scan importers dir: {:#}", err);
             }
         }
 
         Ok(Goods {
-            registry,
-            importers,
+            inner: Inner {
+                data,
+                root: root.into(),
+                tags,
+                assets_by_uuid,
+                assets_by_source_importer,
+                importers,
+            },
         })
     }
 
-    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), SaveError> {
-        let file = std::fs::File::create(path).map_err(SaveError::IoError)?;
-        bincode::serialize_into(file, &self.registry).map_err(SaveError::BincodeError)
+    pub fn save(&self) -> Result<(), SaveError> {
+        let goods_path = self.inner.root.join(".goods");
+        let file =
+            std::fs::File::create(&goods_path).map_err(|source| SaveError::GoodsOpenError {
+                source,
+                path: goods_path.clone().into(),
+            })?;
+        bincode::serialize_into(file, &self.inner.data).map_err(|source| SaveError::BincodeError {
+            source,
+            path: goods_path.into(),
+        })
     }
 
-    /// Registers asset in this goods
+    #[tracing::instrument(skip(self, dir_path), fields(dir_path = %dir_path.as_ref().display()))]
+    pub fn load_importers(&mut self, dir_path: impl AsRef<Path>) -> Result<(), ImporterDirError> {
+        let dir_path = dir_path.as_ref();
+
+        let dir_path_absolute = dir_path.canonicalize().map_err(|source| ImporterDirError {
+            source,
+            path: dir_path.into(),
+        })?;
+
+        let dir_path = relative_to(&dir_path_absolute, &self.inner.root);
+
+        if !self.inner.data.importer_dirs.contains(dir_path.as_ref()) {
+            load_importers_dir(&mut self.inner.importers, &dir_path_absolute).map_err(
+                |source| ImporterDirError {
+                    source,
+                    path: dir_path.clone().into(),
+                },
+            )?;
+            self.inner.data.importer_dirs.insert(dir_path.into());
+        }
+        Ok(())
+    }
+
+    /// Import asset into goods instance
     pub fn store(
         &mut self,
         source: impl AsRef<Path>,
         importer: &str,
         tags: &[&str],
-    ) -> Result<Uuid, RegisterError> {
-        self.registry.register(source, importer, tags)
+    ) -> Result<Uuid, StoreError> {
+        let source = source.as_ref();
+
+        let source = if source.is_relative() {
+            source
+                .canonicalize()
+                .map_err(|err| StoreError::SourceIoError {
+                    path: source.into(),
+                    source: err,
+                })?
+                .into()
+        } else {
+            source.into()
+        };
+
+        self.inner.store(source, importer, tags)
     }
 
     /// Fetches asset in native format.
@@ -232,157 +436,40 @@ impl Goods {
         self.fetch_impl(uuid, version + 1)
     }
 
-    pub fn preimport(&mut self) {
-        macro_rules! try_continue {
-            ($e:expr) => {
-                match $e {
-                    Ok(val) => val,
-                    Err(_) => continue,
-                }
-            };
-        }
-
-        for index in 0.. {
-            if index >= self.registry.assets.len() {
-                break;
-            }
-
-            let asset = &self.registry.assets[index];
-            let source_path = self.registry.sources_root.join(&asset.source);
-
-            match &asset.native {
-                Some(native) => {
-                    let native_path = self.registry.natives_root.join(native);
-
-                    let source_modified =
-                        try_continue!(std::fs::metadata(&source_path).and_then(|m| m.modified()));
-
-                    let native_modified =
-                        try_continue!(std::fs::metadata(&native_path).and_then(|m| m.modified()));
-
-                    if native_modified >= source_modified {
-                        tracing::trace!("Native asset file is up-to-date");
-                        continue;
-                    }
-
-                    tracing::trace!("Native asset file is out-of-date. Perform reimport");
-
-                    match self.importers.get(&*asset.importer) {
-                        None => {
-                            tracing::warn!(
-                                "Importer '{}' not found, asset '{}@{}' cannot be updated",
-                                asset.importer,
-                                asset.uuid,
-                                asset.source.display(),
-                            );
-                        }
-                        Some(importer) => {
-                            let native_path_tmp = native_path.with_extension("tmp");
-
-                            match importer.importer.import(
-                                &source_path,
-                                &native_path_tmp,
-                                &mut self.registry,
-                            ) {
-                                Ok(()) => {
-                                    tracing::trace!("Native file updated");
-                                }
-                                Err(err) => {
-                                    tracing::warn!(
-                                        "Native file reimport failed '{:#}'. Fallback to old file",
-                                        err
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                None => {
-                    tracing::trace!("Native asset file is absent. Import is required");
-                    match self.importers.get(&*asset.importer) {
-                        None => {
-                            tracing::warn!(
-                                "Importer '{}' not found, asset '{}@{}' cannot be initialized",
-                                asset.importer,
-                                asset.uuid,
-                                asset.source.display(),
-                            );
-                        }
-
-                        Some(importer) => {
-                            let native = asset.uuid.to_hyphenated().to_string();
-                            let native_path = self.registry.natives_root.join(&native);
-
-                            let native_path_tmp = native_path.with_extension("tmp");
-
-                            try_continue!(importer.importer.import(
-                                &source_path,
-                                &native_path_tmp,
-                                &mut self.registry
-                            ));
-
-                            try_continue!(std::fs::rename(&native_path_tmp, &native_path));
-
-                            let asset = &mut self.registry.assets[index];
-                            asset.version += 1;
-                            asset.native = Some(PathBuf::from(native).into());
-
-                            tracing::trace!("Native file imported");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     fn fetch_impl(
         &mut self,
         uuid: &Uuid,
         next_version: u64,
     ) -> Result<Option<AssetData>, FetchError> {
-        match self.registry.assets_by_uuid.get(uuid) {
+        match self.inner.assets_by_uuid.get(uuid) {
             None => Err(FetchError::NotFound),
             Some(&index) => {
-                let asset = &self.registry.assets[index];
+                let asset = &self.inner.data.assets[index];
 
-                let source_path = self.registry.sources_root.join(&asset.source);
-
-                match &asset.native {
-                    Some(native) => {
-                        let native_path = self.registry.natives_root.join(native);
-
-                        let source_modified = std::fs::metadata(&source_path)
-                            .and_then(|m| m.modified())
-                            .map_err(FetchError::SourceIoError)?;
-
-                        let mut native_file =
-                            std::fs::File::open(&native_path).map_err(FetchError::NativeIoError)?;
-
-                        let native_modified = native_file
-                            .metadata()
-                            .and_then(|m| m.modified())
-                            .map_err(FetchError::NativeIoError)?;
-
-                        if native_modified >= source_modified {
-                            tracing::trace!("Native asset file is up-to-date");
-                            if next_version > asset.version {
-                                return Ok(None);
-                            }
-
-                            let mut native_data = Vec::new();
-                            native_file
-                                .read_to_end(&mut native_data)
-                                .map_err(FetchError::NativeIoError)?;
-
-                            return Ok(Some(AssetData {
-                                bytes: native_data.into_boxed_slice(),
-                                version: asset.version,
-                            }));
+                let mut native_file =
+                    std::fs::File::open(&asset.native_absolute).map_err(|source| {
+                        FetchError::NativeIoError {
+                            source,
+                            path: asset.native_absolute.to_path_buf().into(),
                         }
+                    })?;
 
+                let native_modified =
+                    native_file
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .map_err(|source| FetchError::NativeIoError {
+                            source,
+                            path: asset.native_absolute.to_path_buf().into(),
+                        })?;
+
+                if let Ok(source_modified) =
+                    std::fs::metadata(&asset.source_absolute).and_then(|m| m.modified())
+                {
+                    if native_modified < source_modified {
                         tracing::trace!("Native asset file is out-of-date. Perform reimport");
 
-                        match self.importers.get(&*asset.importer) {
+                        match self.inner.importers.get(&*asset.importer) {
                             None => {
                                 tracing::warn!(
                                     "Importer '{}' not found, asset '{}@{}' cannot be updated",
@@ -390,164 +477,122 @@ impl Goods {
                                     asset.uuid,
                                     asset.source.display(),
                                 );
-                                if next_version > asset.version {
-                                    return Ok(None);
-                                }
-                                let mut native_data = Vec::new();
-                                native_file
-                                    .read_to_end(&mut native_data)
-                                    .map_err(FetchError::NativeIoError)?;
-
-                                Ok(Some(AssetData {
-                                    bytes: native_data.into_boxed_slice(),
-                                    version: asset.version,
-                                }))
                             }
 
-                            Some(importer) => {
-                                let native_path_tmp = native_path.with_extension("tmp");
+                            Some(importer_entry) => {
+                                let native_path_tmp = asset.native_absolute.with_extension("tmp");
 
-                                match importer.importer.import(
-                                    &source_path,
+                                let result = importer_entry.importer.clone().import(
+                                    &asset.source_absolute.clone(),
                                     &native_path_tmp,
-                                    &mut self.registry,
-                                ) {
+                                    &mut self.inner,
+                                );
+
+                                match result {
                                     Ok(()) => {
+                                        let asset = &mut self.inner.data.assets[index];
+                                        std::fs::rename(&native_path_tmp, &asset.native_absolute)
+                                            .map_err(|source| FetchError::NativeIoError {
+                                            source,
+                                            path: asset.native_absolute.to_path_buf().into(),
+                                        })?;
                                         tracing::trace!("Native file updated");
-
-                                        std::fs::rename(&native_path_tmp, &native_path)
-                                            .map_err(FetchError::NativeIoError)?;
-
-                                        let asset = &mut self.registry.assets[index];
-                                        asset.version += 1;
-
-                                        if asset.version < next_version {
-                                            tracing::warn!(
-                                                "Attempt to fetch updated asset with last known version greater than actual asset version"
-                                            )
-                                        }
                                     }
                                     Err(err) => {
                                         tracing::warn!(
-                                            "Native file reimport failed '{:#}'. Fallback to old file", err
+                                            "Native file reimport failed '{:#}'. Fallback to old file",
+                                            err
                                         );
                                     }
                                 }
-
-                                let asset = &self.registry.assets[index];
-                                if next_version > asset.version {
-                                    Ok(None)
-                                } else {
-                                    Ok(Some(AssetData {
-                                        bytes: std::fs::read(&native_path)
-                                            .map_err(FetchError::NativeIoError)?
-                                            .into_boxed_slice(),
-                                        version: asset.version,
-                                    }))
-                                }
                             }
                         }
+                    } else {
+                        tracing::trace!("Native asset file is up-to-date");
                     }
-                    None => {
-                        tracing::trace!("Native asset file is absent. Import is required");
-                        match self.importers.get(&*asset.importer) {
-                            None => {
-                                tracing::warn!(
-                                    "Importer '{}' not found, asset '{}@{}' cannot be initialized",
-                                    asset.importer,
-                                    asset.uuid,
-                                    asset.source.display(),
-                                );
-                                Err(FetchError::ImporterNotFound)
-                            }
-
-                            Some(importer) => {
-                                let native = asset.uuid.to_hyphenated().to_string();
-                                let native_path = self.registry.natives_root.join(&native);
-
-                                let native_path_tmp = native_path.with_extension("tmp");
-
-                                importer
-                                    .importer
-                                    .import(&source_path, &native_path_tmp, &mut self.registry)
-                                    .map_err(FetchError::ImporterError)?;
-
-                                std::fs::rename(&native_path_tmp, &native_path)
-                                    .map_err(FetchError::NativeIoError)?;
-
-                                let asset = &mut self.registry.assets[index];
-                                asset.version += 1;
-                                asset.native = Some(PathBuf::from(native).into());
-
-                                tracing::trace!("Native file imported");
-
-                                if next_version > asset.version {
-                                    Ok(None)
-                                } else {
-                                    Ok(Some(AssetData {
-                                        bytes: std::fs::read(&native_path)
-                                            .map_err(FetchError::NativeIoError)?
-                                            .into_boxed_slice(),
-                                        version: asset.version,
-                                    }))
-                                }
-                            }
-                        }
-                    }
+                } else {
+                    tracing::warn!("Failed to determine if native file is up-to-date");
                 }
+
+                if next_version > version_from_systime(native_modified) {
+                    tracing::trace!("Native asset is not updated");
+                    return Ok(None);
+                }
+
+                let asset = &self.inner.data.assets[index];
+                let mut native_data = Vec::new();
+                native_file
+                    .read_to_end(&mut native_data)
+                    .map_err(|source| FetchError::NativeIoError {
+                        source,
+                        path: asset.native_absolute.to_path_buf().into(),
+                    })?;
+
+                return Ok(Some(AssetData {
+                    bytes: native_data.into_boxed_slice(),
+                    version: version_from_systime(native_modified),
+                }));
             }
         }
     }
 
     pub fn fetch_frozen(&self, uuid: &Uuid) -> Result<Option<AssetData>, FetchError> {
-        match self.registry.assets_by_uuid.get(uuid) {
+        match self.inner.assets_by_uuid.get(uuid) {
             None => Err(FetchError::NotFound),
             Some(&index) => {
-                let asset = &self.registry.assets[index];
+                let asset = &self.inner.data.assets[index];
 
-                match &asset.native {
-                    Some(native) => {
-                        let native_path = self.registry.natives_root.join(native);
+                let mut native_file =
+                    std::fs::File::open(&asset.native_absolute).map_err(|source| {
+                        FetchError::NativeIoError {
+                            source,
+                            path: asset.native_absolute.to_path_buf().into(),
+                        }
+                    })?;
 
-                        let mut native_file =
-                            std::fs::File::open(&native_path).map_err(FetchError::NativeIoError)?;
+                let native_modified = native_file
+                    .metadata()
+                    .and_then(|meta| meta.modified())
+                    .map_err(|source| FetchError::NativeIoError {
+                        source,
+                        path: asset.native_absolute.to_path_buf().into(),
+                    })?;
 
-                        let mut native_data = Vec::new();
-                        native_file
-                            .read_to_end(&mut native_data)
-                            .map_err(FetchError::NativeIoError)?;
+                let mut native_data = Vec::new();
+                native_file
+                    .read_to_end(&mut native_data)
+                    .map_err(|source| FetchError::NativeIoError {
+                        source,
+                        path: asset.native_absolute.to_path_buf().into(),
+                    })?;
 
-                        return Ok(Some(AssetData {
-                            bytes: native_data.into_boxed_slice(),
-                            version: asset.version,
-                        }));
-                    }
-                    None => Ok(None),
-                }
+                return Ok(Some(AssetData {
+                    bytes: native_data.into_boxed_slice(),
+                    version: version_from_systime(native_modified),
+                }));
             }
         }
     }
 }
 
-impl Registry {
-    fn register(
+impl Inner {
+    fn store(
         &mut self,
-        source: impl AsRef<Path>,
+        source: Box<Path>,
         importer: &str,
         tags: &[&str],
-    ) -> Result<Uuid, RegisterError> {
-        let source = source.as_ref();
+    ) -> Result<Uuid, StoreError> {
+        debug_assert!(source.as_ref().is_absolute());
+        let source = Arc::<Path>::from(relative_to(&source, &self.root));
 
-        if let Some(&index) = self.assets_by_source.get(source) {
-            return Ok(self.assets[index].uuid);
+        let importer: Arc<str> = importer.into();
+
+        if let Some(&index) = self
+            .assets_by_source_importer
+            .get(&(source.clone(), importer.clone()))
+        {
+            return Ok(self.data.assets[index].uuid);
         }
-
-        let uuid = loop {
-            let uuid = Uuid::new_v4();
-            if !self.assets_by_uuid.contains_key(&uuid) {
-                break uuid;
-            }
-        };
 
         let tags = tags
             .iter()
@@ -560,30 +605,70 @@ impl Registry {
             })
             .collect();
 
-        self.assets.push(Asset {
-            uuid,
-            version: 0,
-            source: source.into(),
-            native: None,
-            importer: importer.into(),
-            tags,
-        });
+        let uuid = loop {
+            let uuid = Uuid::new_v4();
+            if !self.assets_by_uuid.contains_key(&uuid) {
+                break uuid;
+            }
+        };
 
-        self.assets_by_uuid.insert(uuid, self.assets.len() - 1);
-        self.assets_by_source
-            .insert(source.into(), self.assets.len() - 1);
+        match self.importers.get(&*importer) {
+            None => Err(StoreError::ImporterNotFound {
+                importer: importer.as_ref().to_owned(),
+            }),
+            Some(importer_entry) => {
+                let source_absolute = self.root.join(&*source);
+                let native_absolute = self.root.join(uuid.to_hyphenated().to_string());
+                let native_path_tmp = native_absolute.with_extension("tmp");
 
-        Ok(uuid)
+                let result = importer_entry.importer.clone().import(
+                    &source_absolute,
+                    &native_path_tmp,
+                    self,
+                );
+
+                if let Err(err) = result {
+                    match err.downcast::<StoreError>() {
+                        Ok(err) => return Err(*err),
+                        Err(err) => return Err(StoreError::ImportError { source: err }),
+                    }
+                }
+
+                if let Err(source) = std::fs::rename(native_path_tmp, &native_absolute) {
+                    return Err(StoreError::NativeIoError {
+                        path: native_absolute.into(),
+                        source,
+                    });
+                }
+
+                self.data.assets.push(Asset {
+                    uuid,
+                    importer: importer.clone(),
+                    tags,
+                    source_absolute: source_absolute.into(),
+                    native_absolute: native_absolute.into(),
+                    source: source.clone(),
+                });
+
+                self.assets_by_uuid.insert(uuid, self.data.assets.len() - 1);
+
+                self.assets_by_source_importer
+                    .insert((source, importer), self.data.assets.len() - 1);
+
+                tracing::info!("Asset '{}' registered", uuid);
+                Ok(uuid)
+            }
+        }
     }
 }
 
-impl goods_import::Registry for Registry {
+impl goods_import::Registry for Inner {
     fn store(
         &mut self,
         source: &Path,
         importer: &str,
     ) -> Result<Uuid, Box<dyn Error + Send + Sync>> {
-        match self.register(source, importer, &[]) {
+        match self.store(source.into(), importer, &[]) {
             Ok(uuid) => Ok(uuid),
             Err(err) => Err(Box::new(err)),
         }
@@ -677,7 +762,7 @@ fn load_importers(
             let library = get_goods_import_version();
 
             if expected == library {
-                match unsafe { lib.symbol::<fn() -> Vec<Box<dyn Importer>>>("get_goods_importers") }
+                match unsafe { lib.symbol::<fn() -> Vec<Arc<dyn Importer>>>("get_goods_importers") }
                 {
                     Ok(get_goods_importers) => {
                         for importer in get_goods_importers() {
@@ -720,5 +805,47 @@ fn load_importers(
             tracing::error!("Failed to get `goods_import_version` function from importer library");
             Err(LoadImportersError::Dlopen(err))
         }
+    }
+}
+
+fn default_absolute_path_arc() -> Arc<Path> {
+    PathBuf::new().into()
+}
+
+fn version_from_systime(systime: SystemTime) -> u64 {
+    systime
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+fn relative_to<'a>(path: &'a Path, root: &Path) -> std::borrow::Cow<'a, Path> {
+    debug_assert!(path.is_absolute());
+    debug_assert!(root.is_absolute());
+
+    let mut pcs = path.components();
+    let mut rcs = root.components();
+
+    let prefix_length = pcs
+        .by_ref()
+        .zip(&mut rcs)
+        .take_while(|(pc, rc)| pc == rc)
+        .count();
+
+    if prefix_length == 0 {
+        path.into()
+    } else {
+        let mut pcs = path.components();
+        pcs.nth(prefix_length - 1);
+
+        let mut rcs = root.components();
+        rcs.nth(prefix_length - 1);
+
+        let up = (0..rcs.count()).fold(PathBuf::new(), |mut acc, _| {
+            acc.push("..");
+            acc
+        });
+
+        up.join(pcs.as_path()).into()
     }
 }

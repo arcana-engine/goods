@@ -6,6 +6,7 @@ use {
 /// Object to register sub-assets when importing super-asset.
 pub trait Registry {
     /// Register sub-asset at source path, assigning specified importer.
+    /// Source path must be absolute.
     fn store(
         &mut self,
         source: &Path,
