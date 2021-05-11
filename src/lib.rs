@@ -14,7 +14,6 @@
 //!
 
 use {
-    goods_import::{goods_import_version, Importer},
     std::{
         collections::{
             hash_map::{Entry, HashMap},
@@ -26,6 +25,7 @@ use {
         sync::Arc,
         time::SystemTime,
     },
+    treasury_import::{treasury_import_version, Importer},
     uuid::Uuid,
 };
 
@@ -54,7 +54,7 @@ struct Asset {
 }
 
 /// Storage for goods.
-pub struct Goods {
+pub struct Treasury {
     inner: Inner,
 }
 
@@ -217,7 +217,7 @@ pub struct ImporterDirError {
     source: std::io::Error,
 }
 
-impl Goods {
+impl Treasury {
     /// Create new goods storage.
     #[tracing::instrument(fields(root = %root.as_ref().display()))]
     pub fn new(root: impl AsRef<Path>, overwrite: bool) -> Result<Self, NewError> {
@@ -253,7 +253,7 @@ impl Goods {
             });
         }
 
-        let goods = Goods {
+        let goods = Treasury {
             inner: Inner {
                 root: root.into(),
                 assets_by_source_importer: HashMap::new(),
@@ -345,7 +345,7 @@ impl Goods {
             }
         }
 
-        Ok(Goods {
+        Ok(Treasury {
             inner: Inner {
                 data,
                 root: root.into(),
@@ -662,7 +662,7 @@ impl Inner {
     }
 }
 
-impl goods_import::Registry for Inner {
+impl treasury_import::Registry for Inner {
     fn store(
         &mut self,
         source: &Path,
@@ -739,7 +739,7 @@ fn load_importers(
     };
 
     match result {
-        Ok(magic) if *magic == goods_import::MAGIC => {}
+        Ok(magic) if *magic == treasury_import::MAGIC => {}
         Ok(magic) => {
             tracing::error!("Wrong `goods_import_magic_number`");
             return Err(LoadImportersError::WrongMagic { magic: *magic });
@@ -753,13 +753,13 @@ fn load_importers(
     let result = unsafe {
         // This is not entirely safe. Random shared library can export similar symbol
         // which has different type.
-        lib.symbol::<fn() -> &'static str>("get_goods_import_version")
+        lib.symbol::<fn() -> &'static str>("get_treasury_import_version")
     };
 
     match result {
-        Ok(get_goods_import_version) => {
-            let expected = goods_import_version();
-            let library = get_goods_import_version();
+        Ok(get_treasury_import_version) => {
+            let expected = treasury_import_version();
+            let library = get_treasury_import_version();
 
             if expected == library {
                 match unsafe { lib.symbol::<fn() -> Vec<Arc<dyn Importer>>>("get_goods_importers") }
@@ -802,7 +802,9 @@ fn load_importers(
             }
         }
         Err(err) => {
-            tracing::error!("Failed to get `goods_import_version` function from importer library");
+            tracing::error!(
+                "Failed to get `treasury_import_version` function from importer library"
+            );
             Err(LoadImportersError::Dlopen(err))
         }
     }

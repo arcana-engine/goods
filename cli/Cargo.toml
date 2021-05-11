@@ -1,15 +1,15 @@
 [package]
-name = "goods-cli"
+name = "treasury-cli"
 version = "0.1.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 
 [[bin]]
-name = "goods"
+name = "treasury"
 path = "src/main.rs"
 
 [dependencies]
-goods = { version = "0.9.0", path = ".." }
+treasury = { version = "0.1.0", path = ".." }
 clap = "3.0.0-beta.2"
 tracing = "0.1"
 tracing-error = "0.1"

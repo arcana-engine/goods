@@ -9,4 +9,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-goods-import = { path = "../import" }
+treasury-import = { path = "../import" }

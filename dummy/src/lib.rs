@@ -1,6 +1,6 @@
 use {
-    goods_import::{Importer, Registry},
     std::{error::Error, path::Path, sync::Arc},
+    treasury_import::{Importer, Registry},
 };
 
 /// This is required to minimize chances that random shared library
@@ -8,18 +8,18 @@ use {
 /// If magic number does not match shared library won't be used.
 #[allow(non_upper_case_globals)]
 #[no_mangle]
-pub static goods_import_magic_number: u32 = goods_import::MAGIC;
+pub static treasury_import_magic_number: u32 = treasury_import::MAGIC;
 
-/// Import version to check that both rustc version and `goods-import` dependency version
-/// match. Otherwise using `get_goods_importers` may cause UB.
+/// Import version to check that both rustc version and `treasury-import` dependency version
+/// match. Otherwise using `get_treasury_importers` may cause UB.
 #[no_mangle]
-pub fn get_goods_import_version() -> &'static str {
-    goods_import::goods_import_version()
+pub fn get_treasury_import_version() -> &'static str {
+    treasury_import::treasury_import_version()
 }
 
 /// Returns array of importers from this library.
 #[no_mangle]
-pub fn get_goods_importers() -> Vec<Arc<dyn Importer>> {
+pub fn get_treasury_importers() -> Vec<Arc<dyn Importer>> {
     vec![Arc::new(DummyImporter)]
 }
 

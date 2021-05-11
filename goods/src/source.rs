@@ -1,3 +1,5 @@
+pub mod treasury;
+
 use {
     std::{error::Error, future::Future},
     uuid::Uuid,

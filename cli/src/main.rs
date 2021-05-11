@@ -1,4 +1,4 @@
-use {clap::Clap, goods::Goods, tracing_subscriber::layer::SubscriberExt as _, uuid::Uuid};
+use {clap::Clap, tracing_subscriber::layer::SubscriberExt as _, treasury::Treasury, uuid::Uuid};
 
 #[derive(Clap)]
 #[clap(version = "0.1", author = "Zakarum <zakarumych@ya.ru>")]
@@ -84,27 +84,27 @@ fn main() -> eyre::Result<()> {
 
     match opts.subcmd {
         SubCommand::Create(create) => {
-            let mut goods = Goods::new(&opts.root, false)?;
-            goods.load_importers(&create.importers_dir)?;
-            goods.save()?;
+            let mut treasury = Treasury::new(&opts.root, false)?;
+            treasury.load_importers(&create.importers_dir)?;
+            treasury.save()?;
             println!("New goods created at '{}'", opts.root)
         }
         SubCommand::Update(update) => {
-            let mut goods = Goods::open(&opts.root)?;
-            goods.load_importers(&update.importers_dir)?;
-            goods.save()?;
+            let mut treasury = Treasury::open(&opts.root)?;
+            treasury.load_importers(&update.importers_dir)?;
+            treasury.save()?;
             println!("Goods at '{}' updated", opts.root)
         }
         SubCommand::Store(register) => {
-            let mut goods = Goods::open(&opts.root)?;
-            let uuid = goods.store(register.source_path, &register.importer, &[])?;
-            goods.save()?;
+            let mut treasury = Treasury::open(&opts.root)?;
+            let uuid = treasury.store(register.source_path, &register.importer, &[])?;
+            treasury.save()?;
             println!("New asset registered as '{}'", uuid);
         }
         SubCommand::Fetch(fetch) => {
-            let mut goods = Goods::open(&opts.root)?;
-            let data = goods.fetch(&fetch.uuid)?;
-            goods.save()?;
+            let mut treasury = Treasury::open(&opts.root)?;
+            let data = treasury.fetch(&fetch.uuid)?;
+            treasury.save()?;
             println!("Asset loaded. Size: {}", data.bytes.len());
 
             if fetch.binary {

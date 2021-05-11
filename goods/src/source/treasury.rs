@@ -1,36 +1,34 @@
 use {
-    goods::Goods,
-    goods_loader::{AssetData, Source},
+    crate::{AssetData, Source},
     std::{
         future::{ready, Ready},
         path::Path,
     },
+    treasury::Treasury,
     uuid::Uuid,
 };
 
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to access native file '{path}'")]
-pub struct GoodsFetchError {
+pub struct TreasuryFetchError {
     path: Box<Path>,
     source: std::io::Error,
 }
 
-pub struct GoodsSource(Goods);
-
-impl Source for GoodsSource {
-    type Error = GoodsFetchError;
-    type Fut = Ready<Result<Option<AssetData>, GoodsFetchError>>;
+impl Source for Treasury {
+    type Error = TreasuryFetchError;
+    type Fut = Ready<Result<Option<AssetData>, TreasuryFetchError>>;
 
     fn load(&self, uuid: &Uuid) -> Self::Fut {
-        let result = match self.0.fetch_frozen(uuid) {
+        let result = match self.fetch_frozen(uuid) {
             Ok(None) => Ok(None),
             Ok(Some(asset_data)) => Ok(Some(AssetData {
                 bytes: asset_data.bytes,
                 version: asset_data.version,
             })),
-            Err(goods::FetchError::NotFound) => Ok(None),
-            Err(goods::FetchError::NativeIoError { source, path }) => {
-                Err(GoodsFetchError { source, path })
+            Err(treasury::FetchError::NotFound) => Ok(None),
+            Err(treasury::FetchError::NativeIoError { source, path }) => {
+                Err(TreasuryFetchError { source, path })
             }
         };
         ready(result)

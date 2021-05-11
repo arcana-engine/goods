@@ -32,8 +32,8 @@ pub trait Importer: Send + Sync {
 pub const MAGIC: u32 = 0xe11c9a87;
 
 /// Returns combination of rustc version and this crate version.
-/// Must be used in `get_goods_import_version` function exported by importer libraries.
-pub fn goods_import_version() -> &'static str {
+/// Must be used in `get_treasury_import_version` function exported by importer libraries.
+pub fn treasury_import_version() -> &'static str {
     concat!(
         env!("CARGO_PKG_VERSION"),
         "@",

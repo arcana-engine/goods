@@ -1,5 +1,5 @@
 [package]
-name = "goods-import"
+name = "treasury-import"
 version = "0.1.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
