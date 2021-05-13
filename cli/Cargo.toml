@@ -3,6 +3,9 @@ name = "treasury-cli"
 version = "0.1.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
+documentation = "https://docs.rs/treasury-cli"
+homepage = "https://github.com/zaq/treasury-cli"
+repository = "https://github.com/zaq/treasury-cli"
 
 [[bin]]
 name = "treasury"

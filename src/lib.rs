@@ -3,13 +3,20 @@
 mod asset;
 mod key;
 mod loader;
-mod source;
+pub mod source;
 
-pub use self::{
-    asset::Asset,
-    loader::{AssetHandle, AssetResult, AssetResultPoisoned, Error, Loader, LoaderBuilder},
-    source::{AssetData, Source},
+pub use {
+    self::{
+        asset::{Asset, AssetBuild, AssetContainer, AssetContainerBuild},
+        loader::{AssetHandle, AssetResult, AssetResultPoisoned, Error, Loader, LoaderBuilder},
+    },
+    goods_proc::{asset, asset_container},
+    uuid::Uuid,
 };
+
+// Used by generated code.
+#[doc(hidden)]
+pub use {bincode, serde, serde_json, std::convert::Infallible, thiserror};
 
 #[derive(Debug, thiserror::Error)]
 #[error("Not found")]

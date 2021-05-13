@@ -1,12 +1,13 @@
 use {
-    crate::{AssetData, Source},
+    crate::source::{AssetData, Source},
     std::{
         future::{ready, Ready},
         path::Path,
     },
-    treasury::Treasury,
     uuid::Uuid,
 };
+
+pub use treasury::Treasury;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to access native file '{path}'")]

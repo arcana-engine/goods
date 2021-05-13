@@ -1,6 +1,6 @@
 use {
     crate::{
-        asset::Asset,
+        asset::{Asset, AssetBuild},
         key::{hash_key, Key},
         source::{AssetData, Source},
         NotFound,
@@ -255,7 +255,10 @@ impl<A> AssetResult<A>
 where
     A: Asset,
 {
-    pub fn get(&mut self, builder: &mut A::Builder) -> Result<Option<&A>, Error> {
+    pub fn get_optional<B>(&mut self, builder: &mut B) -> Result<Option<&A>, Error>
+    where
+        A: AssetBuild<B>,
+    {
         if let AssetResultInner::Decoded {
             uuid,
             key_hash,
@@ -329,12 +332,16 @@ where
         }
     }
 
-    pub fn get_existing(&mut self, builder: &mut A::Builder) -> Result<&A, Error> {
-        self.get(builder)?.ok_or_else(|| Error::new(NotFound))
+    pub fn get<B>(&mut self, builder: &mut B) -> Result<&A, Error>
+    where
+        A: AssetBuild<B>,
+    {
+        self.get_optional(builder)?
+            .ok_or_else(|| Error::new(NotFound))
     }
 }
 
-enum AssetHandleInner<A: Asset> {
+enum AssetHandleInner<A> {
     Asset(A),
     Error(Error),
     Missing,
@@ -346,9 +353,9 @@ enum AssetHandleInner<A: Asset> {
 }
 
 #[repr(transparent)]
-pub struct AssetHandle<A: Asset>(AssetHandleInner<A>);
+pub struct AssetHandle<A>(AssetHandleInner<A>);
 
-impl<A> Unpin for AssetHandle<A> where A: Asset {}
+impl<A> Unpin for AssetHandle<A> {}
 
 impl<A> Future for AssetHandle<A>
 where
@@ -526,7 +533,7 @@ impl Loader {
                             Ok(Some(data)) => {
                                 tracing::debug!("Asset data for `{}` loaded", uuid);
 
-                                match A::decode(data.bytes, Loader { inner }).await {
+                                match A::decode(data.bytes, &Loader { inner }).await {
                                     Ok(decoded) => {
                                         let mut locked_shard = shard.lock();
                                         let asset_entry = locked_shard
