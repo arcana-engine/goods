@@ -35,7 +35,7 @@
 /// }
 /// ```
 ///
-#[proc_macro_derive(Asset, attributes(external, container))]
+#[proc_macro_derive(Asset, attributes(external, container, serde))]
 pub fn asset(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     match parse(item) {
         Ok(parsed) => asset_impl(parsed),
@@ -44,7 +44,7 @@ pub fn asset(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     .into()
 }
 
-#[proc_macro_derive(AssetContainer, attributes(external, container))]
+#[proc_macro_derive(AssetContainer, attributes(external, container, serde))]
 pub fn asset_container(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     match parse(item).and_then(|parsed| asset_container_impl(parsed)) {
         Ok(tokens) => tokens,
@@ -68,12 +68,24 @@ struct Parsed {
     futures_to_decoded_fields: proc_macro2::TokenStream,
     decoded_fields: proc_macro2::TokenStream,
     decoded_to_asset_fields: proc_macro2::TokenStream,
+    serde_attributes: Vec<syn::Attribute>,
 }
 
 fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
     use syn::spanned::Spanned;
 
     let derive_input = syn::parse::<syn::DeriveInput>(item)?;
+
+    let serde_attributes = derive_input
+        .attrs
+        .iter()
+        .filter(|attr| {
+            attr.path
+                .get_ident()
+                .map_or(false, |ident| ident == "serde")
+        })
+        .cloned()
+        .collect();
 
     let mut field_errors = proc_macro2::TokenStream::new();
     let mut builder_bounds = proc_macro2::TokenStream::new();
@@ -111,30 +123,67 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
     };
 
     for (index, field) in data_struct.fields.iter().enumerate() {
-        let external_attribute = field.attrs.iter().position(|attr| {
-            attr.path
-                .get_ident()
-                .map_or(false, |ident| ident == "external")
-        });
+        let asset_attributes = field
+            .attrs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, attr)| {
+                if attr
+                    .path
+                    .get_ident()
+                    .map_or(false, |ident| ident == "external" || ident == "container")
+                {
+                    Some(index)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
-        let container_attribute = field.attrs.iter().position(|attr| {
+        let serde_attributes = field.attrs.iter().filter(|attr| {
             attr.path
                 .get_ident()
-                .map_or(false, |ident| ident == "container")
+                .map_or(false, |ident| ident == "serde")
         });
 
         let ty = &field.ty;
-        match (&external_attribute, &container_attribute) {
-            (&Some(external), &Some(container)) => {
-                return Err(syn::Error::new_spanned(
-                    &field.attrs[external.max(container)],
-                    "Only one of two attributes 'external' or 'container' can be specified",
-                ));
-            }
-            (&Some(external), None) => {
+
+        match asset_attributes.len() {
+            0 => match &field.ident {
+                Some(ident) => {
+                    info_fields.extend(quote::quote!(
+                        #(#serde_attributes)*
+                        #ident: #ty,
+                    ));
+                    futures_fields.extend(quote::quote!(#ident: #ty,));
+                    decoded_fields.extend(quote::quote!(#ident: #ty,));
+                    info_to_futures_fields.extend(quote::quote!(#ident: info.#ident,));
+                    futures_to_decoded_fields.extend(quote::quote!(#ident: futures.#ident,));
+                    decoded_to_asset_fields.extend(quote::quote!(#ident: decoded.#ident,));
+                }
+                None => {
+                    info_fields.extend(quote::quote!(
+                        #(#serde_attributes)*
+                        #ty,
+                    ));
+                    futures_fields.extend(quote::quote!(#ty,));
+                    decoded_fields.extend(quote::quote!(#ty,));
+                    info_to_futures_fields.extend(quote::quote!(info.#index,));
+                    futures_to_decoded_fields.extend(quote::quote!(futures.#index,));
+                    decoded_to_asset_fields.extend(quote::quote!(decoded.#index,));
+                }
+            },
+            1 if field.attrs[asset_attributes[0]].path.get_ident().unwrap() == "external" => {
                 complex = true;
 
-                let external = &field.attrs[external];
+                for attr in serde_attributes {
+                    return Err(syn::Error::new_spanned(
+                        attr,
+                        "`serde` attributes are unexpected for `external` fields",
+                    ));
+                }
+
+                let external = &field.attrs[asset_attributes[0]];
 
                 let as_type_arg = match external.tokens.is_empty() {
                     true => None,
@@ -198,8 +247,18 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                     }
                 }
             }
-            (None, &Some(_)) => {
+            1 if field.attrs[asset_attributes[0]].path.get_ident().unwrap() == "container" => {
                 complex = true;
+
+                let container = &field.attrs[asset_attributes[0]];
+
+                if !container.tokens.is_empty() {
+                    return Err(syn::Error::new_spanned(
+                        &container.tokens,
+                        "`container` attribute does not support any arguments",
+                    ));
+                };
+
                 match &field.ident {
                     Some(ident) => {
                         let error_variant = quote::format_ident!("{}Error", snake_to_pascal(ident));
@@ -214,8 +273,10 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                         builder_bounds.extend(
                             quote::quote!(#ty: ::goods::AssetContainerBuild<GoodsAssetBuilder>,),
                         );
-                        info_fields
-                            .extend(quote::quote!(#ident: <#ty as ::goods::AssetContainer>::Info,));
+                        info_fields.extend(quote::quote!(
+                            #(#serde_attributes)*
+                            #ident: <#ty as ::goods::AssetContainer>::Info,
+                        ));
                         futures_fields
                             .extend(quote::quote!(#ident: <#ty as ::goods::AssetContainer>::Fut,));
                         decoded_fields.extend(
@@ -243,7 +304,10 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                         builder_bounds.extend(
                             quote::quote!(#ty: ::goods::AssetContainerBuild<GoodsAssetBuilder>,),
                         );
-                        info_fields.extend(quote::quote!(<#ty as ::goods::AssetContainer>::Info,));
+                        info_fields.extend(quote::quote!(
+                            #(#serde_attributes)*
+                            <#ty as ::goods::AssetContainer>::Info,
+                        ));
                         futures_fields.extend(quote::quote!(<#ty as ::goods::Asset>::Fut,));
                         decoded_fields
                             .extend(quote::quote!(<#ty as ::goods::AssetContainer>::Decoded,));
@@ -257,24 +321,12 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                     }
                 }
             }
-            (None, None) => match &field.ident {
-                Some(ident) => {
-                    info_fields.extend(quote::quote!(#ident: #ty,));
-                    futures_fields.extend(quote::quote!(#ident: #ty,));
-                    decoded_fields.extend(quote::quote!(#ident: #ty,));
-                    info_to_futures_fields.extend(quote::quote!(#ident: info.#ident,));
-                    futures_to_decoded_fields.extend(quote::quote!(#ident: futures.#ident,));
-                    decoded_to_asset_fields.extend(quote::quote!(#ident: decoded.#ident,));
-                }
-                None => {
-                    info_fields.extend(quote::quote!(#ty,));
-                    futures_fields.extend(quote::quote!(#ty,));
-                    decoded_fields.extend(quote::quote!(#ty,));
-                    info_to_futures_fields.extend(quote::quote!(info.#index,));
-                    futures_to_decoded_fields.extend(quote::quote!(futures.#index,));
-                    decoded_to_asset_fields.extend(quote::quote!(decoded.#index,));
-                }
-            },
+            2 | _ => {
+                return Err(syn::Error::new_spanned(
+                    &field.attrs[asset_attributes[1]],
+                    "Only one of two attributes 'external' or 'container' can be specified",
+                ));
+            }
         }
     }
 
@@ -293,6 +345,7 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
         futures_to_decoded_fields,
         decoded_fields,
         decoded_to_asset_fields,
+        serde_attributes,
     })
 }
 
@@ -312,6 +365,7 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
         futures_to_decoded_fields,
         decoded_fields,
         decoded_to_asset_fields,
+        serde_attributes,
     } = parsed;
 
     let data_struct = match &derive_input.data {
@@ -324,7 +378,8 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
     let tokens = match data_struct.fields {
         syn::Fields::Unit => quote::quote! {
             #[derive(::goods::serde::Deserialize)]
-            pub struct #decoded;
+            #(#serde_attributes)*
+            pub struct #info;
 
             #[derive(::std::fmt::Debug, ::goods::thiserror::Error)]
             pub enum #error {
@@ -337,15 +392,15 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
 
             impl ::goods::Asset for #ty {
                 type Error = #error;
-                type Decoded = #decoded;
-                type Fut = ::std::future::Ready<::std::result::Result<#decoded, #error>>;
+                type Decoded = #info;
+                type Fut = ::std::future::Ready<::std::result::Result<#info, #error>>;
 
                 fn decode(bytes: ::std::boxed::Box<[u8]>, _loader: &::goods::Loader) -> Self::Fut {
                     use {::std::result::Result::{Ok, Err}, ::goods::serde_json::error::Category};
 
                     /// Zero-length is definitely bincode. For unit structs we may skip deserialization.
                     if bytes.is_empty() {
-                        return ready(Ok(#decoded))
+                        return ready(Ok(#info))
                     }
 
                     let result = match ::goods::serde_json::from_slice(&*bytes) {
@@ -369,7 +424,7 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
             }
 
             impl<GoodsAssetBuilder> ::goods::AssetBuild<GoodsAssetBuilder> for #ty {
-                fn build(#decoded: #decoded, _builder: &mut GoodsAssetBuilder) -> ::std::result::Result<Self, #error> {
+                fn build(#info: #info, _builder: &mut GoodsAssetBuilder) -> ::std::result::Result<Self, #error> {
                     Ok(#ty)
                 }
             }
@@ -377,6 +432,7 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
         syn::Fields::Unnamed(_) => todo!("Not yet implemented"),
         syn::Fields::Named(_) if complex => quote::quote! {
             #[derive(::goods::serde::Deserialize)]
+            #(#serde_attributes)*
             struct #info { #info_fields }
 
             struct #futures { #futures_fields }
@@ -453,7 +509,8 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
         },
         syn::Fields::Named(_) => quote::quote! {
             #[derive(::goods::serde::Deserialize)]
-            pub struct #decoded { #decoded_fields }
+            #(#serde_attributes)*
+            pub struct #info { #info_fields }
 
             #[derive(::std::fmt::Debug, ::goods::thiserror::Error)]
             pub enum #error {
@@ -466,8 +523,8 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
 
             impl ::goods::Asset for #ty {
                 type Error = #error;
-                type Decoded = #decoded;
-                type Fut = ::std::future::Ready<Result<#decoded, #error>>;
+                type Decoded = #info;
+                type Fut = ::std::future::Ready<Result<#info, #error>>;
 
                 fn decode(bytes: ::std::boxed::Box<[u8]>, _loader: &::goods::Loader) -> Self::Fut {
                     use {::std::result::Result::{Ok, Err}, ::goods::serde_json::error::Category};
@@ -501,7 +558,7 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
             }
 
             impl<GoodsAssetBuilder> ::goods::AssetBuild<GoodsAssetBuilder> for #ty {
-                fn build(decoded: #decoded, _builder: &mut GoodsAssetBuilder) -> Result<Self, #error> {
+                fn build(decoded: #info, _builder: &mut GoodsAssetBuilder) -> Result<Self, #error> {
                     Ok(#ty {
                         #decoded_to_asset_fields
                     })
@@ -529,6 +586,7 @@ fn asset_container_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream>
         futures_to_decoded_fields,
         decoded_fields,
         decoded_to_asset_fields,
+        serde_attributes,
     } = parsed;
 
     if !complex {
@@ -551,6 +609,7 @@ fn asset_container_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream>
         syn::Fields::Unnamed(_) => todo!("Not yet implemented"),
         syn::Fields::Named(_) if complex => quote::quote! {
             #[derive(::goods::serde::Deserialize)]
+            #(#serde_attributes)*
             pub struct #info { #info_fields }
 
             struct #futures { #futures_fields }

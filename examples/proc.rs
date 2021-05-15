@@ -55,6 +55,18 @@ pub struct AssetWithWrapper {
     #[external(as WrapperAsset)]
     a: u32,
 }
+
+#[derive(Clone, Asset)]
+#[serde(rename_all = "UPPERCASE")]
+pub struct AssetWithSerdeAttribute {
+    #[serde(default = "default_a")]
+    a: u32,
+}
+
+fn default_a() -> u32 {
+    42
+}
+
 #[derive(Clone, serde::Deserialize)]
 struct SimpleFieldType {}
 
@@ -115,6 +127,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Uuid::from_u128(7),
                 b"{\"a\":\"00000000-0000-0000-0000-000000000006\"}".to_vec().into_boxed_slice(),
             ),
+            (
+                Uuid::from_u128(8),
+                b"{}".to_vec().into_boxed_slice(),
+            ),
         ]
         .into_iter()
         .collect(),
@@ -139,6 +155,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let _: &AssetWithWrapper = loader.load(&Uuid::from_u128(7)).await.get(&mut ())?;
     println!("AssetWithWrapper loaded");
+
+    let _: &AssetWithSerdeAttribute = loader.load(&Uuid::from_u128(8)).await.get(&mut ())?;
+    println!("AssetWithSerdeAttribute loaded");
 
     Ok(())
 }
