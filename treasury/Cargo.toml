@@ -18,4 +18,3 @@ bincode = "1.0"
 thiserror = "1.0"
 dlopen = "0.1"
 eyre = "0.6"
-
