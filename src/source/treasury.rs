@@ -6,6 +6,8 @@ use {
     uuid::Uuid,
 };
 
+pub use treasury::OpenError;
+
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to access native file '{path}'")]
 pub struct TreasuryFetchError {
@@ -22,6 +24,11 @@ impl TreasurySource {
         TreasurySource {
             treasury: Arc::new(Mutex::new(treasury)),
         }
+    }
+
+    pub fn open(root: impl AsRef<Path>) -> Result<Self, OpenError> {
+        let treasury = Treasury::open(root)?;
+        Ok(TreasurySource::new(treasury))
     }
 }
 

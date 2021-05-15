@@ -116,6 +116,7 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                 .get_ident()
                 .map_or(false, |ident| ident == "external")
         });
+
         let container_attribute = field.attrs.iter().position(|attr| {
             attr.path
                 .get_ident()
@@ -130,8 +131,24 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                     "Only one of two attributes 'external' or 'container' can be specified",
                 ));
             }
-            (&Some(_), None) => {
+            (&Some(external), None) => {
                 complex = true;
+
+                let external = &field.attrs[external];
+
+                let as_type_arg = match external.tokens.is_empty() {
+                    true => None,
+                    false => {
+                        Some(external.parse_args_with(|stream: syn::parse::ParseStream| {
+                            let _as = stream.parse::<syn::Token![as]>()?;
+                            let as_type = stream.parse::<syn::Type>()?;
+                            Ok(as_type)
+                        })?)
+                    }
+                };
+
+                let as_type = as_type_arg.as_ref().unwrap_or(ty);
+
                 match &field.ident {
                     Some(ident) => {
                         let error_variant = quote::format_ident!("{}Error", snake_to_pascal(ident));
@@ -143,17 +160,20 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                             #[error(#error_text)]
                             #error_variant { source: ::goods::Error },
                         ));
-                        builder_bounds
-                            .extend(quote::quote!(#ty: ::goods::AssetBuild<GoodsAssetBuilder>,));
+                        builder_bounds.extend(
+                            quote::quote!(#as_type: ::goods::AssetBuild<GoodsAssetBuilder>,),
+                        );
                         info_fields.extend(quote::quote!(#ident: ::goods::Uuid,));
-                        futures_fields.extend(quote::quote!(#ident: ::goods::AssetHandle<#ty>,));
-                        decoded_fields.extend(quote::quote!(#ident: ::goods::AssetResult<#ty>,));
+                        futures_fields
+                            .extend(quote::quote!(#ident: ::goods::AssetHandle<#as_type>,));
+                        decoded_fields
+                            .extend(quote::quote!(#ident: ::goods::AssetResult<#as_type>,));
                         info_to_futures_fields
                             .extend(quote::quote!(#ident: loader.load(&info.#ident),));
                         futures_to_decoded_fields
                             .extend(quote::quote!(#ident: futures.#ident.await,));
                         decoded_to_asset_fields
-                            .extend(quote::quote!(#ident: decoded.#ident.get(builder).map_err(|err| #error::#error_variant { source: err })?.clone(),));
+                            .extend(quote::quote!(#ident: <#ty as ::std::convert::From<#as_type>>::from(decoded.#ident.get(builder).map_err(|err| #error::#error_variant { source: err })?.clone()),));
                     }
                     None => {
                         let error_variant =

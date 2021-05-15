@@ -39,6 +39,22 @@ pub struct ComplexAsset {
     a: SimpleAsset,
 }
 
+#[derive(Clone, Asset)]
+pub struct WrapperAsset {
+    wrapped: u32,
+}
+
+impl From<WrapperAsset> for u32 {
+    fn from(w: WrapperAsset) -> Self {
+        w.wrapped
+    }
+}
+
+#[derive(Clone, Asset)]
+pub struct AssetWithWrapper {
+    #[external(as WrapperAsset)]
+    a: u32,
+}
 #[derive(Clone, serde::Deserialize)]
 struct SimpleFieldType {}
 
@@ -91,6 +107,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .to_vec()
                     .into_boxed_slice(),
             ),
+            (
+                Uuid::from_u128(6),
+                b"{\"wrapped\": 42}".to_vec().into_boxed_slice(),
+            ),
+            (
+                Uuid::from_u128(7),
+                b"{\"a\":\"00000000-0000-0000-0000-000000000006\"}".to_vec().into_boxed_slice(),
+            ),
         ]
         .into_iter()
         .collect(),
@@ -109,6 +133,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let _: &ComplexAsset = loader.load(&Uuid::from_u128(5)).await.get(&mut ())?;
     println!("ComplexAsset loaded");
+
+    let _: &WrapperAsset = loader.load(&Uuid::from_u128(6)).await.get(&mut ())?;
+    println!("WrapperAsset loaded");
+
+    let _: &AssetWithWrapper = loader.load(&Uuid::from_u128(7)).await.get(&mut ())?;
+    println!("AssetWithWrapper loaded");
 
     Ok(())
 }
