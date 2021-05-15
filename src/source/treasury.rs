@@ -1,13 +1,10 @@
 use {
     crate::source::{AssetData, Source},
-    std::{
-        future::{ready, Ready},
-        path::Path,
-    },
+    std::{future::Future, path::Path, pin::Pin, sync::Arc},
+    tokio::sync::Mutex,
+    treasury::Treasury,
     uuid::Uuid,
 };
-
-pub use treasury::Treasury;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to access native file '{path}'")]
@@ -16,26 +13,56 @@ pub struct TreasuryFetchError {
     source: std::io::Error,
 }
 
-impl Source for Treasury {
+pub struct TreasurySource {
+    treasury: Arc<Mutex<Treasury>>,
+}
+
+impl TreasurySource {
+    pub fn new(treasury: Treasury) -> Self {
+        TreasurySource {
+            treasury: Arc::new(Mutex::new(treasury)),
+        }
+    }
+}
+
+impl Source for TreasurySource {
     type Error = TreasuryFetchError;
-    type Fut = Ready<Result<Option<AssetData>, TreasuryFetchError>>;
+    type Fut = Pin<Box<dyn Future<Output = Result<Option<AssetData>, TreasuryFetchError>> + Send>>;
 
     fn load(&self, uuid: &Uuid) -> Self::Fut {
-        let result = match self.fetch_frozen(uuid) {
-            Ok(None) => Ok(None),
-            Ok(Some(asset_data)) => Ok(Some(AssetData {
-                bytes: asset_data.bytes,
-                version: asset_data.version,
-            })),
-            Err(treasury::FetchError::NotFound) => Ok(None),
-            Err(treasury::FetchError::NativeIoError { source, path }) => {
-                Err(TreasuryFetchError { source, path })
-            }
-        };
-        ready(result)
+        let treasury = self.treasury.clone();
+        let uuid = *uuid;
+        Box::pin(async move {
+            let result = match treasury.lock().await.fetch(&uuid) {
+                Ok(asset_data) => Ok(Some(AssetData {
+                    bytes: asset_data.bytes,
+                    version: asset_data.version,
+                })),
+                Err(treasury::FetchError::NotFound) => Ok(None),
+                Err(treasury::FetchError::NativeIoError { source, path }) => {
+                    Err(TreasuryFetchError { source, path })
+                }
+            };
+            result
+        })
     }
 
-    fn update(&self, _uuid: &Uuid, _version: u64) -> Self::Fut {
-        ready(Ok(None))
+    fn update(&self, uuid: &Uuid, version: u64) -> Self::Fut {
+        let treasury = self.treasury.clone();
+        let uuid = *uuid;
+        Box::pin(async move {
+            let result = match treasury.lock().await.fetch_updated(&uuid, version) {
+                Ok(None) => Ok(None),
+                Ok(Some(asset_data)) => Ok(Some(AssetData {
+                    bytes: asset_data.bytes,
+                    version: asset_data.version,
+                })),
+                Err(treasury::FetchError::NotFound) => Ok(None),
+                Err(treasury::FetchError::NativeIoError { source, path }) => {
+                    Err(TreasuryFetchError { source, path })
+                }
+            };
+            result
+        })
     }
 }
