@@ -10,7 +10,7 @@ pub use {
         asset::{Asset, AssetBuild, AssetContainer, AssetContainerBuild},
         loader::{AssetHandle, AssetResult, AssetResultPoisoned, Error, Loader, LoaderBuilder},
     },
-    goods_proc::{asset, asset_container},
+    goods_proc::{Asset, AssetContainer},
     uuid::Uuid,
 };
 

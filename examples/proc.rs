@@ -1,8 +1,7 @@
 use {
     goods::{
-        asset, asset_container,
         source::{AssetData, Source},
-        Loader, Uuid,
+        Asset, AssetContainer, Loader, Uuid,
     },
     std::{
         collections::HashMap,
@@ -11,32 +10,27 @@ use {
     },
 };
 
-#[asset]
-#[derive(Clone)]
+#[derive(Clone, Asset)]
 pub struct UnitAsset;
 
-#[asset]
-#[derive(Clone)]
+#[derive(Clone, Asset)]
 pub struct SimpleAsset {
     field: SimpleFieldType,
 }
 
-#[asset]
-#[derive(Clone)]
+#[derive(Clone, Asset)]
 pub struct TwoLevelAsset {
     #[external]
     a: SimpleAsset,
 }
 
-#[asset_container]
-#[derive(Clone)]
+#[derive(Clone, AssetContainer)]
 pub struct Container {
     #[external]
     a: UnitAsset,
 }
 
-#[asset]
-#[derive(Clone)]
+#[derive(Clone, Asset)]
 pub struct ComplexAsset {
     #[container]
     c: Container,

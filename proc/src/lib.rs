@@ -35,24 +35,18 @@
 /// }
 /// ```
 ///
-#[proc_macro_attribute]
-pub fn asset(
-    attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    match parse(attr, item) {
+#[proc_macro_derive(Asset, attributes(external, container))]
+pub fn asset(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    match parse(item) {
         Ok(parsed) => asset_impl(parsed),
         Err(error) => error.into_compile_error(),
     }
     .into()
 }
 
-#[proc_macro_attribute]
-pub fn asset_container(
-    attr: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    match parse(attr, item).and_then(|parsed| asset_container_impl(parsed)) {
+#[proc_macro_derive(AssetContainer, attributes(external, container))]
+pub fn asset_container(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    match parse(item).and_then(|parsed| asset_container_impl(parsed)) {
         Ok(tokens) => tokens,
         Err(error) => error.into_compile_error(),
     }
@@ -61,7 +55,7 @@ pub fn asset_container(
 
 struct Parsed {
     complex: bool,
-    item_struct: syn::ItemStruct,
+    derive_input: syn::DeriveInput,
     error: syn::Ident,
     info: syn::Ident,
     futures: syn::Ident,
@@ -76,30 +70,47 @@ struct Parsed {
     decoded_to_asset_fields: proc_macro2::TokenStream,
 }
 
-fn parse(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> syn::Result<Parsed> {
+fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
     use syn::spanned::Spanned;
-    let mut item_struct = syn::parse::<syn::ItemStruct>(item)?;
+
+    let derive_input = syn::parse::<syn::DeriveInput>(item)?;
 
     let mut field_errors = proc_macro2::TokenStream::new();
     let mut builder_bounds = proc_macro2::TokenStream::new();
 
-    let info = quote::format_ident!("{}Info", item_struct.ident);
+    let info = quote::format_ident!("{}Info", derive_input.ident);
     let mut info_fields = proc_macro2::TokenStream::new();
     let mut info_to_futures_fields = proc_macro2::TokenStream::new();
 
-    let futures = quote::format_ident!("{}futures", item_struct.ident);
+    let futures = quote::format_ident!("{}futures", derive_input.ident);
     let mut futures_fields = proc_macro2::TokenStream::new();
     let mut futures_to_decoded_fields = proc_macro2::TokenStream::new();
 
-    let decoded = quote::format_ident!("{}Decoded", item_struct.ident);
+    let decoded = quote::format_ident!("{}Decoded", derive_input.ident);
     let mut decoded_fields = proc_macro2::TokenStream::new();
     let mut decoded_to_asset_fields = proc_macro2::TokenStream::new();
 
-    let error = quote::format_ident!("{}AssetError", item_struct.ident);
+    let error = quote::format_ident!("{}AssetError", derive_input.ident);
 
     let mut complex: bool = false;
 
-    for (index, field) in item_struct.fields.iter_mut().enumerate() {
+    let data_struct = match &derive_input.data {
+        syn::Data::Struct(data) => data,
+        syn::Data::Enum(data) => {
+            return Err(syn::Error::new_spanned(
+                data.enum_token,
+                "Only structs are currently supported by derive(Asset) macro",
+            ))
+        }
+        syn::Data::Union(data) => {
+            return Err(syn::Error::new_spanned(
+                data.union_token,
+                "Only structs are currently supported by derive(Asset) macro",
+            ))
+        }
+    };
+
+    for (index, field) in data_struct.fields.iter().enumerate() {
         let external_attribute = field.attrs.iter().position(|attr| {
             attr.path
                 .get_ident()
@@ -119,9 +130,8 @@ fn parse(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> syn::
                     "Only one of two attributes 'external' or 'container' can be specified",
                 ));
             }
-            (&Some(external), None) => {
+            (&Some(_), None) => {
                 complex = true;
-                field.attrs.remove(external);
                 match &field.ident {
                     Some(ident) => {
                         let error_variant = quote::format_ident!("{}Error", snake_to_pascal(ident));
@@ -168,9 +178,8 @@ fn parse(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> syn::
                     }
                 }
             }
-            (None, &Some(container)) => {
+            (None, &Some(_)) => {
                 complex = true;
-                field.attrs.remove(container);
                 match &field.ident {
                     Some(ident) => {
                         let error_variant = quote::format_ident!("{}Error", snake_to_pascal(ident));
@@ -251,7 +260,7 @@ fn parse(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> syn::
 
     Ok(Parsed {
         complex,
-        item_struct,
+        derive_input,
         error,
         info,
         futures,
@@ -270,7 +279,7 @@ fn parse(_attr: proc_macro::TokenStream, item: proc_macro::TokenStream) -> syn::
 fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
     let Parsed {
         complex,
-        item_struct,
+        derive_input,
         error,
         info,
         futures,
@@ -285,12 +294,15 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
         decoded_to_asset_fields,
     } = parsed;
 
-    let ty = &item_struct.ident;
+    let data_struct = match &derive_input.data {
+        syn::Data::Struct(data) => data,
+        _ => unreachable!(),
+    };
 
-    let tokens = match item_struct.fields {
+    let ty = &derive_input.ident;
+
+    let tokens = match data_struct.fields {
         syn::Fields::Unit => quote::quote! {
-            #item_struct
-
             #[derive(::goods::serde::Deserialize)]
             pub struct #decoded;
 
@@ -344,8 +356,6 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
         },
         syn::Fields::Unnamed(_) => todo!("Not yet implemented"),
         syn::Fields::Named(_) if complex => quote::quote! {
-            #item_struct
-
             #[derive(::goods::serde::Deserialize)]
             struct #info { #info_fields }
 
@@ -422,8 +432,6 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
             }
         },
         syn::Fields::Named(_) => quote::quote! {
-            #item_struct
-
             #[derive(::goods::serde::Deserialize)]
             pub struct #decoded { #decoded_fields }
 
@@ -488,7 +496,7 @@ fn asset_impl(parsed: Parsed) -> proc_macro2::TokenStream {
 fn asset_container_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
     let Parsed {
         complex,
-        item_struct,
+        derive_input,
         error,
         info,
         futures,
@@ -510,15 +518,18 @@ fn asset_container_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream>
         ));
     }
 
-    let ty = &item_struct.ident;
+    let ty = &derive_input.ident;
 
-    let tokens = match item_struct.fields {
+    let data_struct = match &derive_input.data {
+        syn::Data::Struct(data) => data,
+        _ => unreachable!(),
+    };
+
+    let tokens = match data_struct.fields {
         syn::Fields::Unit => unreachable!(),
 
         syn::Fields::Unnamed(_) => todo!("Not yet implemented"),
         syn::Fields::Named(_) if complex => quote::quote! {
-            #item_struct
-
             #[derive(::goods::serde::Deserialize)]
             pub struct #info { #info_fields }
 
