@@ -1,16 +1,18 @@
 //! Asset loading facility.
 
 mod asset;
+mod field;
 mod key;
 mod loader;
 pub mod source;
 
 pub use {
     self::{
-        asset::{Asset, AssetBuild, AssetContainer, AssetContainerBuild},
+        asset::{Asset, AssetBuild},
+        field::{AssetField, AssetFieldBuild, Container, External},
         loader::{AssetHandle, AssetResult, AssetResultPoisoned, Error, Loader, LoaderBuilder},
     },
-    goods_proc::{Asset, AssetContainer},
+    goods_proc::{Asset, AssetField},
     uuid::Uuid,
 };
 

@@ -1,7 +1,7 @@
 use {
     goods::{
         source::{AssetData, Source},
-        Asset, AssetContainer, Loader, Uuid,
+        Asset, AssetField, Loader, Uuid,
     },
     std::{
         collections::HashMap,
@@ -24,7 +24,7 @@ pub struct TwoLevelAsset {
     a: SimpleAsset,
 }
 
-#[derive(Clone, AssetContainer)]
+#[derive(Clone, AssetField)]
 pub struct Container {
     #[external]
     a: UnitAsset,
@@ -65,6 +65,13 @@ pub struct AssetWithSerdeAttribute {
 
 fn default_a() -> u32 {
     42
+}
+
+#[derive(Clone, Asset)]
+pub struct AssetWithOption {
+    #[serde(default)]
+    #[external]
+    foo: Option<SimpleAsset>,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -158,6 +165,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let _: &AssetWithSerdeAttribute = loader.load(&Uuid::from_u128(8)).await.get(&mut ())?;
     println!("AssetWithSerdeAttribute loaded");
+
+    let _: &AssetWithOption = loader.load(&Uuid::from_u128(8)).await.get(&mut ())?;
+    println!("AssetWithOption loaded");
 
     Ok(())
 }
