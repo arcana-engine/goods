@@ -488,6 +488,7 @@ impl Inner {
             .assets_by_source_importer
             .get(&(source.clone(), importer.clone()))
         {
+            tracing::trace!("Already imported");
             return Ok(self.data.assets[index].uuid());
         }
 
@@ -514,6 +515,8 @@ impl Inner {
                 importer: importer.as_ref().to_owned(),
             }),
             Some(importer_entry) => {
+                tracing::trace!("Importer found");
+
                 let source_absolute = self.root.join(&*source);
                 let native_absolute = self.root.join(uuid.to_hyphenated().to_string());
                 let native_path_tmp = native_absolute.with_extension("tmp");
@@ -521,12 +524,14 @@ impl Inner {
                 let result = importer_entry.import(&source_absolute, &native_path_tmp, self);
 
                 if let Err(err) = result {
+                    tracing::error!("Importer failed");
                     match err.downcast::<StoreError>() {
                         Ok(err) => return Err(*err),
                         Err(err) => return Err(StoreError::ImportError { source: err }),
                     }
                 }
 
+                tracing::trace!("Imported successfully");
                 if let Err(source) = std::fs::rename(native_path_tmp, &native_absolute) {
                     return Err(StoreError::NativeIoError {
                         path: native_absolute.into(),

@@ -7,6 +7,7 @@ use {
     },
     treasury_import::{treasury_import_version, Importer, Registry},
 };
+
 pub struct Importers {
     /// Importers
     map: HashMap<Box<str>, ImporterEntry>,
@@ -109,6 +110,8 @@ fn load_importers(
     importers: &mut HashMap<Box<str>, ImporterEntry>,
     lib_path: &Path,
 ) -> Result<(), LoadImportersError> {
+    tracing::trace!("Load importers from: {}", lib_path.display());
+
     let lib = dlopen::raw::Library::open(lib_path)
         .map_err(|source| LoadImportersError::OpenLibrary { source })?;
 
@@ -121,17 +124,17 @@ fn load_importers(
         // While malicious library can export functions and trigger UB there,
         // linking to one is akin to depending on unsound library.
         // Hint: Don't have malicious shared libraries in your system.
-        lib.symbol::<&u32>("goods_import_magic_number")
+        lib.symbol::<&u32>("treasury_import_magic_number")
     };
 
     match result {
         Ok(magic) if *magic == treasury_import::MAGIC => {}
         Ok(magic) => {
-            tracing::error!("Wrong `goods_import_magic_number`");
+            tracing::error!("Wrong `treasury_import_magic_number`");
             return Err(LoadImportersError::WrongMagic { magic: *magic });
         }
         Err(err) => {
-            tracing::error!("`goods_import_magic_number` symbol not found");
+            tracing::error!("`treasury_import_magic_number` symbol not found");
             return Err(LoadImportersError::FindSymbol { source: err });
         }
     }
@@ -148,12 +151,14 @@ fn load_importers(
             let library = get_treasury_import_version();
 
             if expected == library {
-                match unsafe { lib.symbol::<fn() -> Vec<Arc<dyn Importer>>>("get_goods_importers") }
-                {
-                    Ok(get_goods_importers) => {
-                        for importer in get_goods_importers() {
+                match unsafe {
+                    lib.symbol::<fn() -> Vec<Arc<dyn Importer>>>("get_treasury_importers")
+                } {
+                    Ok(get_treasury_importers) => {
+                        for importer in get_treasury_importers() {
                             match importers.entry(importer.name().into()) {
                                 Entry::Vacant(entry) => {
+                                    tracing::trace!("Importer '{}' added", importer.name());
                                     entry.insert(ImporterEntry {
                                         inner: importer,
                                         _lib: lib.clone(),
