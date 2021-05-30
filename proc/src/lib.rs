@@ -8,7 +8,7 @@
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// /// Asset field type. Additional structures are generated, but no `Asset` implementation.
 /// /// Fields of types with `#[asset_field]` attribute are not replaced by uuids as external assets.
 /// #[asset_field]
@@ -17,7 +17,7 @@
 /// }
 ///
 /// /// Simple deserializable type. Included as-is into generated types for `#[asset]`.
-/// #[serde::Deserialize]
+/// #[derive(serde::Deserialize)]
 /// struct Bar {}
 ///
 /// /// Another asset type.
