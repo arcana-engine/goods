@@ -4,8 +4,10 @@ version = "0.1.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 
+[features]
+ffi = []
+default = ["ffi"]
+
 [dependencies]
 uuid = { version = "0.8" }
-
-[build-dependencies]
-rustc_version = "0.3"
+eyre = "0.6"

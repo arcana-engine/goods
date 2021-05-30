@@ -1,4 +1,6 @@
-use {clap::Clap, tracing_subscriber::layer::SubscriberExt as _, treasury::Treasury, uuid::Uuid};
+use {clap::Clap, tracing_subscriber::layer::SubscriberExt as _, uuid::Uuid};
+
+pub use treasury::*;
 
 #[derive(Clap)]
 #[clap(version = "0.1", author = "Zakarum <zakarumych@ya.ru>")]
@@ -17,22 +19,20 @@ struct Opts {
 
 #[derive(Clap)]
 enum SubCommand {
-    Create(Create),
-    Update(Update),
+    Create(CreateUpdate),
+    Update(CreateUpdate),
     Store(Store),
     Fetch(Fetch),
+    List(List),
+    Remove(Remove),
 }
 
+/// A subcommand for creating new treasury
 #[derive(Clap)]
-struct Create {
-    #[clap(short, long, default_value = ".")]
-    importers_dir: String,
-}
-
-#[derive(Clap)]
-struct Update {
-    #[clap(short, long, default_value = ".")]
-    importers_dir: String,
+struct CreateUpdate {
+    /// Relative path to importers.
+    #[clap(short, long)]
+    importers: Vec<String>,
 }
 
 /// A subcommand for registering assets
@@ -42,9 +42,13 @@ struct Store {
     #[clap()]
     source_path: String,
 
-    /// Importer name.
+    /// Source format.
     #[clap()]
-    importer: String,
+    source_format: String,
+
+    /// Native format.
+    #[clap()]
+    native_format: String,
 }
 
 /// A subcommand for registering assets
@@ -59,7 +63,27 @@ struct Fetch {
     uuid: Uuid,
 }
 
-fn main() -> eyre::Result<()> {
+/// A subcommand for registering assets
+#[derive(Clap)]
+struct List {
+    /// Filter by importer.
+    #[clap()]
+    native_format: Option<String>,
+
+    /// Filter by importer.
+    #[clap()]
+    tags: Vec<String>,
+}
+
+/// A subcommand for registering assets
+#[derive(Clap)]
+struct Remove {
+    /// Uuids to remove.
+    #[clap(short)]
+    uuids: Vec<Uuid>,
+}
+
+pub fn main() -> eyre::Result<()> {
     if let Err(err) = color_eyre::install() {
         tracing::error!("Failed to install eyre report handler: {}", err);
     }
@@ -70,7 +94,7 @@ fn main() -> eyre::Result<()> {
         0 => tracing::Level::WARN,
         1 => tracing::Level::INFO,
         2 => tracing::Level::DEBUG,
-        3 | _ => tracing::Level::TRACE,
+        _ => tracing::Level::TRACE,
     };
 
     if let Err(err) = tracing::subscriber::set_global_default(
@@ -85,44 +109,76 @@ fn main() -> eyre::Result<()> {
     match opts.subcmd {
         SubCommand::Create(create) => {
             let mut treasury = Treasury::new(&opts.root, false)?;
-            treasury.load_importers(&create.importers_dir)?;
+
+            for dir_path in create.importers {
+                treasury.load_importers_dir(dir_path.as_ref())?;
+            }
+
             treasury.save()?;
+
             println!("New goods created at '{}'", opts.root)
         }
-        SubCommand::Update(update) => {
+        SubCommand::Update(create) => {
             let mut treasury = Treasury::open(&opts.root)?;
-            treasury.load_importers(&update.importers_dir)?;
+
+            for dir_path in create.importers {
+                treasury.load_importers_dir(dir_path.as_ref())?;
+            }
+
             treasury.save()?;
-            println!("Goods at '{}' updated", opts.root)
+
+            println!("New goods created at '{}'", opts.root)
         }
-        SubCommand::Store(register) => {
-            let mut treasury = Treasury::open(&opts.root)?;
-            let uuid = treasury.store(register.source_path, &register.importer, &[])?;
+        SubCommand::Store(store) => {
+            let treasury = Treasury::open(&opts.root)?;
+
+            let uuid = treasury.store(
+                store.source_path,
+                &store.source_format,
+                &store.native_format,
+                &[],
+            )?;
+
             treasury.save()?;
+
             println!("New asset registered as '{}'", uuid);
         }
         SubCommand::Fetch(fetch) => {
             let mut treasury = Treasury::open(&opts.root)?;
             let data = treasury.fetch(&fetch.uuid)?;
-            treasury.save()?;
             println!("Asset loaded. Size: {}", data.bytes.len());
 
             if fetch.binary {
                 let stdout = std::io::stdout();
                 std::io::Write::write_all(&mut stdout.lock(), &data.bytes)?;
-            } else {
-                if data.bytes.len() < 1024 {
-                    match std::str::from_utf8(&data.bytes) {
-                        Ok(data) => {
-                            println!("{}", data);
-                        }
-                        Err(err) => {
-                            eprintln!("Data is not UTF-8. {:#}", err);
-                        }
+            } else if data.bytes.len() < 1024 {
+                match std::str::from_utf8(&data.bytes) {
+                    Ok(data) => {
+                        println!("{}", data);
                     }
-                } else {
-                    eprintln!("Data is too long");
+                    Err(err) => {
+                        eprintln!("Data is not UTF-8. {:#}", err);
+                    }
                 }
+            } else {
+                eprintln!("Data is too long");
+            }
+        }
+        SubCommand::List(list) => {
+            let treasury = Treasury::open(&opts.root)?;
+            let assets = treasury.list(
+                list.tags.iter().map(|s| &**s),
+                list.native_format.as_deref(),
+            );
+            println!("{} assets found", assets.len());
+            for asset in assets {
+                println!("{:#}", asset);
+            }
+        }
+        SubCommand::Remove(remove) => {
+            let treasury = Treasury::open(&opts.root)?;
+            for uuid in &remove.uuids {
+                treasury.remove(*uuid);
             }
         }
     }

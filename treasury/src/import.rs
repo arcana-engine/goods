@@ -1,202 +1,565 @@
 use {
+    crate::treasury::Registry,
     std::{
-        collections::hash_map::{Entry, HashMap},
-        error::Error,
+        collections::hash_map::HashMap,
         path::{Path, PathBuf},
-        sync::Arc,
+        sync::{Arc, Mutex, MutexGuard, Weak},
     },
-    treasury_import::{treasury_import_version, Importer, Registry},
+    uuid::Uuid,
+    wasmer::{
+        Array, Function, Instance, LazyInit, Memory, Module, NativeFunc, Store, WasmPtr, WasmerEnv,
+    },
+    wasmer_wasi::{WasiEnv, WasiState},
 };
 
-pub struct Importers {
-    /// Importers
-    map: HashMap<Box<str>, ImporterEntry>,
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ImporterOpaque {
+    _byte: u8,
 }
 
-#[derive(Clone)]
-pub struct ImporterEntry {
-    inner: Arc<dyn Importer>,
-    _lib: Arc<dlopen::raw::Library>,
-}
+const WASM_IMPORTERS_INITIAL_COUNT: u32 = 64;
+const ERROR_BUFFER_LEN: u32 = 2048;
 
-impl Importer for ImporterEntry {
-    fn name(&self) -> &str {
-        self.inner.name()
-    }
-
-    fn import(
-        &self,
-        source_path: &Path,
-        native_path: &Path,
-        registry: &mut dyn Registry,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.inner.import(source_path, native_path, registry)
-    }
+pub(crate) struct Importers {
+    map: HashMap<Box<str>, HashMap<Box<str>, Arc<WasmImporter>>>,
+    store: Store,
+    wasi: WasiEnv,
 }
 
 impl Importers {
-    pub fn new() -> Self {
+    pub fn new(treasury_path: &Path) -> Self {
+        let store = Store::default();
+
+        let cd = std::env::current_dir().unwrap();
+
+        let wasi = WasiState::new("treasury")
+            .preopen(|p| p.directory(&cd).read(true))
+            .unwrap()
+            .preopen(|p| {
+                p.directory(treasury_path)
+                    .read(true)
+                    .write(true)
+                    .create(true)
+            })
+            .unwrap()
+            .finalize()
+            .unwrap();
+
         Importers {
+            wasi,
             map: HashMap::new(),
+            store,
         }
     }
 
-    pub fn from_dirs(dirs: impl IntoIterator<Item = impl AsRef<Path>>) -> Self {
-        let mut map = HashMap::new();
-        for dir in dirs {
-            if let Err(err) = load_importers_dir(&mut map, dir.as_ref()) {
-                tracing::error!("Failed to scan importers dir: {:#}", err);
-            }
-        }
-
-        Importers { map }
+    pub fn get_importer(&self, source: &str, native: &str) -> Option<Arc<WasmImporter>> {
+        self.map.get(source)?.get(native).cloned()
     }
 
-    pub fn load_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<()> {
-        load_importers_dir(&mut self.map, dir.as_ref())
-    }
+    pub fn load_importers_dir(
+        &mut self,
+        dir_path: &Path,
+        registry: &Arc<Mutex<Registry>>,
+    ) -> std::io::Result<()> {
+        let dir = std::fs::read_dir(dir_path)?;
 
-    pub fn get_importer(&self, name: &str) -> Option<impl Importer> {
-        self.map.get(name).cloned()
-    }
-}
+        for e in dir {
+            let e = e?;
+            let path = PathBuf::from(e.file_name());
+            let is_wasm_module = path.extension().map_or(false, |e| e == "wasm");
 
-fn load_importers_dir(
-    importers: &mut HashMap<Box<str>, ImporterEntry>,
-    dir_path: &Path,
-) -> std::io::Result<()> {
-    let dir = std::fs::read_dir(dir_path)?;
-
-    for e in dir {
-        let e = e?;
-        let path = PathBuf::from(e.file_name());
-        let is_shared_library = path
-            .extension()
-            .map_or(false, |e| e == dlopen::utils::PLATFORM_FILE_EXTENSION);
-
-        if is_shared_library {
-            let lib_path = dir_path.join(path);
-            if let Err(err) = load_importers(importers, &lib_path) {
-                tracing::warn!(
-                    "Failed to load importers from library {}: '{:#}'",
-                    lib_path.display(),
-                    eyre::Report::from(err),
-                );
-            }
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum LoadImportersError {
-    #[error("Failed to load shared library")]
-    OpenLibrary { source: dlopen::Error },
-
-    #[error("Failed to find symbol in library")]
-    FindSymbol { source: dlopen::Error },
-
-    #[error(
-        "Magic number from importer library '{magic:0x}' does not match expected value '0xe11c9a87'"
-    )]
-    WrongMagic { magic: u32 },
-
-    #[error("Version of `goods-import` does not match")]
-    WrongVersion,
-}
-
-fn load_importers(
-    importers: &mut HashMap<Box<str>, ImporterEntry>,
-    lib_path: &Path,
-) -> Result<(), LoadImportersError> {
-    tracing::trace!("Load importers from: {}", lib_path.display());
-
-    let lib = dlopen::raw::Library::open(lib_path)
-        .map_err(|source| LoadImportersError::OpenLibrary { source })?;
-
-    let lib = Arc::new(lib);
-
-    let result = unsafe {
-        // This is not entirely safe. Random shared library can export similar symbol
-        // which has different type.
-        // Checking magic number is nice to avoid problems from random shared library.
-        // While malicious library can export functions and trigger UB there,
-        // linking to one is akin to depending on unsound library.
-        // Hint: Don't have malicious shared libraries in your system.
-        lib.symbol::<&u32>("treasury_import_magic_number")
-    };
-
-    match result {
-        Ok(magic) if *magic == treasury_import::MAGIC => {}
-        Ok(magic) => {
-            tracing::error!("Wrong `treasury_import_magic_number`");
-            return Err(LoadImportersError::WrongMagic { magic: *magic });
-        }
-        Err(err) => {
-            tracing::error!("`treasury_import_magic_number` symbol not found");
-            return Err(LoadImportersError::FindSymbol { source: err });
-        }
-    }
-
-    let result = unsafe {
-        // This is not entirely safe. Random shared library can export similar symbol
-        // which has different type.
-        lib.symbol::<fn() -> &'static str>("get_treasury_import_version")
-    };
-
-    match result {
-        Ok(get_treasury_import_version) => {
-            let expected = treasury_import_version();
-            let library = get_treasury_import_version();
-
-            if expected == library {
-                match unsafe {
-                    lib.symbol::<fn() -> Vec<Arc<dyn Importer>>>("get_treasury_importers")
-                } {
-                    Ok(get_treasury_importers) => {
-                        for importer in get_treasury_importers() {
-                            match importers.entry(importer.name().into()) {
-                                Entry::Vacant(entry) => {
-                                    tracing::trace!("Importer '{}' added", importer.name());
-                                    entry.insert(ImporterEntry {
-                                        inner: importer,
-                                        _lib: lib.clone(),
-                                    });
-                                }
-                                Entry::Occupied(_) => {
-                                    tracing::warn!(
-                                        "Duplicate importer name '{}'. Importer skipped",
-                                        importer.name()
-                                    );
-                                }
-                            }
-                        }
-                        tracing::info!("Added importers from {}", lib_path.display());
-                        Ok(())
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            "Failed to get `get_importers` function from importer library"
-                        );
-                        Err(LoadImportersError::FindSymbol { source: err })
-                    }
+            if is_wasm_module {
+                let wasm_path = dir_path.join(path);
+                if let Err(err) = self.load_importers(&wasm_path, registry) {
+                    tracing::warn!(
+                        "Could not load importers from '{}'. {:#}",
+                        wasm_path.display(),
+                        err
+                    );
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_importers(
+        &mut self,
+        wasm_path: &Path,
+        registry: &Arc<Mutex<Registry>>,
+    ) -> eyre::Result<()> {
+        tracing::trace!("Load importers from: {}", wasm_path.display());
+
+        let bytes = std::fs::read(wasm_path)?;
+
+        if !wasmer::is_wasm(&bytes) {
+            return Err(eyre::eyre!("Not a WASM module"));
+        }
+
+        let module = Module::new(&self.store, &bytes)?;
+
+        let mut imports = self.wasi.import_object(&module)?;
+
+        let env = ImporterEnv {
+            memory: LazyInit::new(),
+            registry: Arc::downgrade(registry),
+        };
+
+        imports.register("env", wasmer::import_namespace! {{
+            "treasury_registry_store" => Function::new_native_with_env(&self.store, env.clone(), treasury_registry_store),
+            "treasury_registry_fetch" => Function::new_native_with_env(&self.store, env, treasury_registry_fetch),
+        }});
+
+        let instance = Instance::new(&module, &imports)?;
+
+        let memory = instance.exports.get_memory("memory")?;
+
+        let alloc = instance
+            .exports
+            .get_native_function::<(u32, u32), WasmPtr<u8, Array>>("treasury_importer_alloc")?;
+
+        let dealloc = instance
+            .exports
+            .get_native_function::<(WasmPtr<u8, Array>, u32, u32), ()>(
+                "treasury_importer_dealloc",
+            )?;
+
+        let name_source_native_trampoline = instance.exports.get_native_function::<(
+            WasmPtr<fn()>,
+            WasmPtr<ImporterOpaque>,
+            WasmPtr<u8, Array>,
+            u32,
+        ), u32>(
+            "treasury_importer_name_source_native_trampoline",
+        )?;
+
+        let importer_import_trampoline =
+            instance.exports.get_native_function::<(
+                WasmPtr<fn()>,
+                WasmPtr<ImporterOpaque>,
+                WasmPtr<u8, Array>,
+                u32,
+                WasmPtr<u8, Array>,
+                u32,
+                WasmPtr<u8, Array>,
+                u32,
+            ), i32>("treasury_importer_import_trampoline")?;
+
+        let enumerate_importers = instance
+            .exports
+            .get_native_function::<(WasmPtr<WasmImporterFFI, Array>, u32), u32>(
+                "treasury_importer_enumerate_importers",
+            )?;
+
+        let mut allocated_size =
+            std::mem::size_of::<WasmImporterFFI>() as u32 * WASM_IMPORTERS_INITIAL_COUNT;
+
+        let mut ptr = alloc.call(allocated_size, 4)?;
+        let mut importers_ptr = WasmPtr::<WasmImporterFFI, Array>::new(ptr.offset());
+
+        let count = enumerate_importers.call(importers_ptr, WASM_IMPORTERS_INITIAL_COUNT)?;
+
+        if count > WASM_IMPORTERS_INITIAL_COUNT {
+            dealloc.call(ptr, allocated_size, 4)?;
+            allocated_size = count * std::mem::size_of::<WasmImporterFFI>() as u32;
+            ptr = alloc.call(allocated_size, 4)?;
+            importers_ptr = WasmPtr::<WasmImporterFFI, Array>::new(ptr.offset());
+
+            match enumerate_importers.call(importers_ptr, count)? {
+                new_count if new_count == count => {
+                    // success
+                }
+                _ => {
+                    // failure
+                    eyre::eyre!("Failed to enumerate importers from WASM module");
+                }
+            }
+        }
+
+        let state = Arc::new(WasmState {
+            alloc,
+            dealloc,
+            name_source_native_trampoline,
+            importer_import_trampoline,
+            memory: memory.clone(),
+        });
+
+        let importers_ptr_u32 = WasmPtr::<u32, Array>::new(importers_ptr.offset());
+
+        let ptrs = importers_ptr_u32.deref(memory, 0, count * 5).unwrap();
+
+        for ptrs in ptrs.chunks_exact(5) {
+            let ffi = match ptrs {
+                [data, name, source, native, import] => WasmImporterFFI {
+                    data: WasmPtr::new(data.get()),
+                    name: WasmPtr::new(name.get()),
+                    source: WasmPtr::new(source.get()),
+                    native: WasmPtr::new(native.get()),
+                    import: WasmPtr::new(import.get()),
+                },
+                _ => unreachable!(),
+            };
+
+            let importer = WasmImporter::new(ffi, state.clone());
+            tracing::info!(
+                "Importer '{}' from '{}' to '{}' loaded",
+                importer.name(),
+                importer.source(),
+                importer.native()
+            );
+
+            self.map
+                .entry(importer.source().into())
+                .or_default()
+                .entry(importer.native().into())
+                .or_insert_with(|| Arc::new(importer));
+        }
+
+        state.dealloc.call(ptr, allocated_size, 4)?;
+
+        Ok(())
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct WasmImporterFFI {
+    data: WasmPtr<ImporterOpaque>,
+    name: WasmPtr<fn()>,
+    source: WasmPtr<fn()>,
+    native: WasmPtr<fn()>,
+    import: WasmPtr<fn()>,
+}
+
+type NameSourceNativeFunctionArgs = (
+    WasmPtr<fn()>,
+    WasmPtr<ImporterOpaque>,
+    WasmPtr<u8, Array>,
+    u32,
+);
+
+type ImportFunctionArgs = (
+    WasmPtr<fn()>,
+    WasmPtr<ImporterOpaque>,
+    WasmPtr<u8, Array>,
+    u32,
+    WasmPtr<u8, Array>,
+    u32,
+    WasmPtr<u8, Array>,
+    u32,
+);
+
+struct WasmState {
+    name_source_native_trampoline: NativeFunc<NameSourceNativeFunctionArgs, u32>,
+    importer_import_trampoline: NativeFunc<ImportFunctionArgs, i32>,
+    alloc: NativeFunc<(u32, u32), WasmPtr<u8, Array>>,
+    dealloc: NativeFunc<(WasmPtr<u8, Array>, u32, u32)>,
+
+    memory: Memory,
+}
+
+pub struct WasmImporter {
+    ffi: WasmImporterFFI,
+    state: Arc<WasmState>,
+    name: String,
+    source: String,
+    native: String,
+}
+
+impl WasmImporter {
+    fn new(ffi: WasmImporterFFI, state: Arc<WasmState>) -> Self {
+        const STRING_CAP: u32 = 256;
+        let wasm_ptr = state.alloc.call(STRING_CAP, 1).unwrap();
+
+        let len = state
+            .name_source_native_trampoline
+            .call(ffi.name, ffi.data, wasm_ptr, STRING_CAP)
+            .unwrap();
+
+        let name = wasm_ptr.get_utf8_string(&state.memory, len).unwrap();
+
+        let len = state
+            .name_source_native_trampoline
+            .call(ffi.source, ffi.data, wasm_ptr, STRING_CAP)
+            .unwrap();
+
+        let source = wasm_ptr.get_utf8_string(&state.memory, len).unwrap();
+
+        let len = state
+            .name_source_native_trampoline
+            .call(ffi.native, ffi.data, wasm_ptr, STRING_CAP)
+            .unwrap();
+
+        let native = wasm_ptr.get_utf8_string(&state.memory, len).unwrap();
+
+        state.dealloc.call(wasm_ptr, STRING_CAP, 1).unwrap();
+
+        WasmImporter {
+            ffi,
+            state,
+            name,
+            source,
+            native,
+        }
+    }
+}
+
+impl WasmImporter {
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub(crate) fn native(&self) -> &str {
+        &self.native
+    }
+
+    pub(crate) fn import(
+        &self,
+        source_path: &Path,
+        native_path: &Path,
+        registry: MutexGuard<'_, Registry>,
+    ) -> eyre::Result<()> {
+        drop(registry);
+
+        #[cfg(unix)]
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+        #[cfg(windows)]
+        use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
+
+        let source_path = OsStr::new(source_path);
+        let native_path = OsStr::new(native_path);
+
+        let source_path = source_path.as_bytes();
+        let native_path = native_path.as_bytes();
+
+        let ptr = self
+            .state
+            .alloc
+            .call(
+                source_path.len() as u32 + native_path.len() as u32 + ERROR_BUFFER_LEN,
+                1,
+            )
+            .unwrap();
+
+        let source_ptr = WasmPtr::<u8, Array>::new(ptr.offset());
+        let native_ptr = WasmPtr::<u8, Array>::new(ptr.offset() + source_path.len() as u32);
+
+        let error_ptr = WasmPtr::<u8, Array>::new(
+            ptr.offset() + source_path.len() as u32 + native_path.len() as u32,
+        );
+
+        let slice = source_ptr
+            .deref(&self.state.memory, 0, source_path.len() as u32)
+            .unwrap();
+        slice
+            .iter()
+            .zip(source_path)
+            .for_each(|(cell, byte)| cell.set(*byte));
+
+        let slice = native_ptr
+            .deref(&self.state.memory, 0, native_path.len() as u32)
+            .unwrap();
+
+        slice
+            .iter()
+            .zip(native_path)
+            .for_each(|(cell, byte)| cell.set(*byte));
+
+        let result = self.state.importer_import_trampoline.call(
+            self.ffi.import,
+            self.ffi.data,
+            source_ptr,
+            source_path.len() as u32,
+            native_ptr,
+            native_path.len() as u32,
+            error_ptr,
+            ERROR_BUFFER_LEN,
+        )?;
+
+        if result < 0 {
+            let len = result.abs() as u32;
+            let error = error_ptr.get_utf8_string(&self.state.memory, len).unwrap();
+
+            Err(eyre::eyre!("Importer error: '{}'", error))
+        } else {
+            debug_assert_eq!(result, 0);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(any(unix, target_os = "wasi"))]
+type WasmOsStrPtr = WasmPtr<u8, Array>;
+
+#[cfg(windows)]
+type WasmStrPtr = WasmPtr<u16, Array>;
+
+#[allow(clippy::too_many_arguments)]
+fn treasury_registry_store(
+    env: &ImporterEnv,
+    source_ptr: WasmOsStrPtr,
+    source_len: u32,
+    source_format_ptr: WasmPtr<u8, Array>,
+    source_format_len: u32,
+    native_format_ptr: WasmPtr<u8, Array>,
+    native_format_len: u32,
+    result_ptr: WasmPtr<u8, Array>,
+    result_len: u32,
+) -> i32 {
+    #[cfg(unix)]
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+    #[cfg(windows)]
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    #[cfg(target_os = "wasi")]
+    use std::{ffi::Ostr, os::wasi::ffi::OsStrExt};
+
+    assert!(result_len >= 16);
+
+    let source = source_ptr
+        .deref(env.memory_ref().unwrap(), 0, source_len)
+        .unwrap();
+
+    let source = source.iter().map(std::cell::Cell::get).collect::<Vec<_>>();
+
+    #[cfg(any(unix, target_os = "wasi"))]
+    let source = OsStr::from_bytes(&source);
+
+    let source_format = source_format_ptr
+        .deref(env.memory_ref().unwrap(), 0, source_format_len)
+        .unwrap();
+
+    let source_format = source_format
+        .iter()
+        .map(std::cell::Cell::get)
+        .collect::<Vec<_>>();
+
+    let source_format = std::str::from_utf8(&source_format).unwrap();
+
+    let native_format = native_format_ptr
+        .deref(env.memory_ref().unwrap(), 0, native_format_len)
+        .unwrap();
+
+    let native_format = native_format
+        .iter()
+        .map(std::cell::Cell::get)
+        .collect::<Vec<_>>();
+
+    let native_format = std::str::from_utf8(&native_format).unwrap();
+
+    let result = Registry::store(
+        &env.registry.upgrade().unwrap(),
+        Path::new(source),
+        source_format,
+        native_format,
+        &[],
+    );
+
+    match result {
+        Ok(uuid) => {
+            let result = result_ptr.deref(env.memory_ref().unwrap(), 0, 16).unwrap();
+            result
+                .iter()
+                .zip(uuid.as_bytes())
+                .for_each(|(cell, byte)| cell.set(*byte));
+            16
+        }
+        Err(err) => {
+            let error = format!("{:#}", err);
+            let len = result_len.min(error.len() as u32);
+
+            let result = result_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
+
+            result
+                .iter()
+                .zip(error.as_bytes())
+                .for_each(|(cell, byte)| cell.set(*byte));
+
+            -(len as i32)
+        }
+    }
+}
+
+fn treasury_registry_fetch(
+    env: &ImporterEnv,
+    uuid: WasmPtr<u8, Array>,
+    path_ptr: WasmOsStrPtr,
+    path_len: u32,
+    error_ptr: WasmPtr<u8, Array>,
+    error_len: u32,
+) -> i32 {
+    #[cfg(unix)]
+    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+    #[cfg(windows)]
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    #[cfg(target_os = "wasi")]
+    use std::{ffi::Ostr, os::wasi::ffi::OsStrExt};
+
+    let uuid = uuid.deref(env.memory_ref().unwrap(), 0, 16).unwrap();
+    let mut bytes = [0u8; 16];
+    bytes
+        .iter_mut()
+        .zip(uuid)
+        .for_each(|(byte, cell)| *byte = cell.get());
+
+    let uuid = Uuid::from_bytes(bytes);
+
+    let result = Registry::fetch(&env.registry.upgrade().unwrap(), &uuid, 0);
+
+    match result {
+        Ok(None) => unreachable!(),
+        Ok(Some(info)) => {
+            let native_path = info.native_path;
+            let native_path = OsStr::new(&*native_path).as_bytes();
+
+            if path_len < native_path.len() as u32 {
+                let err = b"Path buffer is too small";
+                let len = error_len.min(err.len() as u32);
+                let error = error_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
+
+                error
+                    .iter()
+                    .zip(&err[..])
+                    .for_each(|(cell, byte)| cell.set(*byte));
+
+                -(len as i32)
             } else {
-                tracing::warn!(
-                    "Importer plugin '{}' has outdated `goods-import` dependency version. Expected: {}, Library: {}",
-                    lib_path.display(),
-                    expected,
-                    library,
-                );
-                Err(LoadImportersError::WrongVersion)
+                let len = native_path.len() as u32;
+
+                let path = path_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
+
+                path.iter()
+                    .zip(native_path)
+                    .for_each(|(cell, byte)| cell.set(*byte));
+
+                len as i32
             }
         }
         Err(err) => {
-            tracing::error!(
-                "Failed to get `treasury_import_version` function from importer library"
-            );
-            Err(LoadImportersError::FindSymbol { source: err })
+            let err = format!("{:#}", err);
+            let err = err.as_bytes();
+            let len = error_len.min(err.len() as u32);
+            let error = error_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
+
+            error
+                .iter()
+                .zip(err)
+                .for_each(|(cell, byte)| cell.set(*byte));
+
+            -(len as i32)
         }
     }
+}
+
+#[derive(Clone, WasmerEnv)]
+pub struct ImporterEnv {
+    #[wasmer(export)]
+    memory: LazyInit<Memory>,
+
+    registry: Weak<Mutex<Registry>>,
 }

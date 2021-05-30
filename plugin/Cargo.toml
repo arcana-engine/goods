@@ -1,12 +1,12 @@
 [package]
-name = "dummy"
+name = "plugin"
 version = "0.1.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 publish = false
 
 [lib]
-crate-type = ["dylib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 treasury-import = { path = "../import" }

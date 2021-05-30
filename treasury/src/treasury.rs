@@ -1,37 +1,32 @@
 use {
     crate::{asset::Asset, import::Importers},
     std::{
-        collections::{HashMap, HashSet},
-        error::Error,
         io::Read,
         path::{Path, PathBuf},
-        sync::Arc,
+        sync::{Arc, Mutex},
         time::SystemTime,
     },
-    treasury_import::Importer,
     uuid::Uuid,
 };
 
 /// Storage for goods.
 pub struct Treasury {
-    inner: Inner,
+    registry: Arc<Mutex<Registry>>,
 }
 
-struct Inner {
+#[derive(PartialEq, Hash)]
+struct Kind {
+    source_path: Arc<Path>,
+    source_format: Arc<str>,
+    native_format: Arc<str>,
+}
+
+pub(crate) struct Registry {
     /// All paths not suffixed with `_absolute` are relative to this.
     root: Box<Path>,
 
-    // Data loaded from `root.join(".treasury")`.
+    // Data loaded from `root.join(".treasury/db")`.
     data: Data,
-
-    /// Set of all tags.
-    tags: HashSet<Arc<str>>,
-
-    /// Lookup assets by uuid.
-    assets_by_uuid: HashMap<Uuid, usize>,
-
-    /// Lookup assets by source path and importer name combination.
-    assets_by_source_importer: HashMap<(Arc<Path>, Arc<str>), usize>,
 
     /// Importers
     importers: Importers,
@@ -39,9 +34,7 @@ struct Inner {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Data {
-    /// Set of paths to directories from where importer libraries are loaded.
-    importer_dirs: HashSet<Box<Path>>,
-
+    importers_dirs: Vec<Box<Path>>,
     /// Array with all registered assets.
     assets: Vec<Asset>,
 }
@@ -71,6 +64,12 @@ pub enum NewError {
         source: std::io::Error,
     },
 
+    #[error("Failed to create goods directory '{path}'")]
+    GoodsDirCreateError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
+
     #[error("Root '{path}' is not a directory")]
     RootIsNotDir { path: Box<Path> },
 
@@ -87,9 +86,9 @@ pub enum SaveError {
     },
 
     #[error("Failed to deserialize goods file")]
-    BincodeError {
+    JsonError {
         path: Box<Path>,
-        source: bincode::Error,
+        source: serde_json::Error,
     },
 }
 
@@ -104,6 +103,12 @@ pub enum OpenError {
         source: std::io::Error,
     },
 
+    #[error("Failed to create directory for goods path '{path}'")]
+    GoodsCreateError {
+        path: Box<Path>,
+        source: std::io::Error,
+    },
+
     #[error("Failed to open goods path '{path}'")]
     GoodsOpenError {
         path: Box<Path>,
@@ -111,9 +116,9 @@ pub enum OpenError {
     },
 
     #[error("Failed to deserialize goods file")]
-    BincodeError {
+    JsonError {
         path: Box<Path>,
-        source: bincode::Error,
+        source: serde_json::Error,
     },
 }
 
@@ -131,13 +136,14 @@ pub enum FetchError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
-    #[error("Failed to find importer '{importer}'")]
-    ImporterNotFound { importer: String },
+    #[error("No importer from '{source_format}' to '{native_format}' found")]
+    ImporterNotFound {
+        source_format: String,
+        native_format: String,
+    },
 
     #[error("Import failed")]
-    ImportError {
-        source: Box<dyn Error + Send + Sync>,
-    },
+    ImportError { source: eyre::Report },
 
     #[error("Failed to access source file '{path}'")]
     SourceIoError {
@@ -150,13 +156,6 @@ pub enum StoreError {
         path: Box<Path>,
         source: std::io::Error,
     },
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Failed to scan importers directory '{path}'")]
-pub struct ImporterDirError {
-    path: Box<Path>,
-    source: std::io::Error,
 }
 
 impl Treasury {
@@ -181,46 +180,51 @@ impl Treasury {
                 path: root.into(),
             })?;
 
-        let goods_path = root.join(".goods");
+        let treasury_path = root.join(".treasury");
 
-        if !overwrite && goods_path.exists() {
-            return Err(NewError::GoodsAlreadyExist {
-                path: goods_path.into(),
-            });
-        }
+        if treasury_path.exists() {
+            if treasury_path.is_file() {
+                return Err(NewError::GoodsAlreadyExist {
+                    path: treasury_path.into(),
+                });
+            }
 
-        if overwrite && !goods_path.is_file() {
-            return Err(NewError::GoodsAlreadyExist {
-                path: goods_path.into(),
+            let manifest_path = treasury_path.join("manifest.json");
+            if !overwrite && manifest_path.exists() {
+                return Err(NewError::GoodsAlreadyExist {
+                    path: treasury_path.into(),
+                });
+            }
+        } else if let Err(err) = std::fs::create_dir(&treasury_path) {
+            return Err(NewError::GoodsDirCreateError {
+                source: err,
+                path: treasury_path.into(),
             });
         }
 
         let goods = Treasury {
-            inner: Inner {
+            registry: Arc::new(Mutex::new(Registry {
+                importers: Importers::new(&treasury_path),
                 root: root.into(),
-                assets_by_source_importer: HashMap::new(),
-                assets_by_uuid: HashMap::new(),
-                tags: HashSet::new(),
-                importers: Importers::new(),
                 data: Data {
                     assets: Vec::new(),
-                    importer_dirs: HashSet::new(),
+                    importers_dirs: Vec::new(),
                 },
-            },
+            })),
         };
 
-        let file =
-            std::fs::File::create(&goods_path).map_err(|source| SaveError::GoodsOpenError {
-                source,
-                path: goods_path.clone().into(),
-            })?;
+        // let file =
+        //     std::fs::File::create(&treasury_path.join("manifest.json")).map_err(|source| {
+        //         SaveError::GoodsOpenError {
+        //             source,
+        //             path: treasury_path.clone().into(),
+        //         }
+        //     })?;
 
-        bincode::serialize_into(file, &goods.inner.data).map_err(|source| {
-            SaveError::BincodeError {
-                source,
-                path: goods_path.clone().into(),
-            }
-        })?;
+        // serde_json::to_writer(file, &goods.inner.data).map_err(|source| SaveError::JsonError {
+        //     source,
+        //     path: treasury_path.clone().into(),
+        // })?;
 
         Ok(goods)
     }
@@ -237,120 +241,132 @@ impl Treasury {
                 path: root.into(),
             })?;
 
-        let goods_path = root.join(".goods");
+        let treasury_path = root.join(".treasury");
+        let manifest_path = treasury_path.join("manifest.json");
 
         let file =
-            std::fs::File::open(&goods_path).map_err(|source| OpenError::GoodsOpenError {
+            std::fs::File::open(&manifest_path).map_err(|source| OpenError::GoodsOpenError {
                 source,
-                path: goods_path.clone().into(),
+                path: manifest_path.clone().into(),
             })?;
 
         let mut data: Data =
-            bincode::deserialize_from(file).map_err(|source| OpenError::BincodeError {
+            serde_json::from_reader(file).map_err(|source| OpenError::JsonError {
                 source,
-                path: goods_path.clone().into(),
+                path: manifest_path.clone().into(),
             })?;
 
-        let mut tags = HashSet::<Arc<str>>::new();
         for asset in &mut data.assets {
-            asset.dedup_tags(&mut tags);
             asset.update_abs_paths(&root);
         }
 
-        let assets_by_uuid = data
-            .assets
-            .iter()
-            .enumerate()
-            .map(|(index, asset)| (asset.uuid(), index))
-            .collect();
+        let registry = Arc::new(Mutex::new(Registry {
+            importers: Importers::new(&treasury_path),
+            data,
+            root: root.into(),
+        }));
 
-        let assets_by_source_importer = data
-            .assets
-            .iter()
-            .enumerate()
-            .map(|(index, asset)| ((asset.source().clone(), asset.importer().clone()), index))
-            .collect();
+        let registry_clone = registry.clone();
 
-        Ok(Treasury {
-            inner: Inner {
-                importers: Importers::from_dirs(
-                    data.importer_dirs.iter().map(|dir| root.join(dir)),
-                ),
-                data,
-                root: root.into(),
-                tags,
-                assets_by_uuid,
-                assets_by_source_importer,
-            },
-        })
+        let mut lock = registry.lock().unwrap();
+        let me = &mut *lock;
+
+        for dir_path in &me.data.importers_dirs {
+            if let Err(err) = me.importers.load_importers_dir(dir_path, &registry_clone) {
+                tracing::error!(
+                    "Failed to load importers from '{}'. {:#}",
+                    dir_path.display(),
+                    err
+                );
+            }
+        }
+        drop(lock);
+
+        Ok(Treasury { registry })
     }
 
     pub fn save(&self) -> Result<(), SaveError> {
-        let goods_path = self.inner.root.join(".goods");
-        let file =
-            std::fs::File::create(&goods_path).map_err(|source| SaveError::GoodsOpenError {
-                source,
-                path: goods_path.clone().into(),
-            })?;
-        bincode::serialize_into(file, &self.inner.data).map_err(|source| SaveError::BincodeError {
-            source,
-            path: goods_path.into(),
-        })
+        Registry::save(&self.registry)
     }
 
-    #[tracing::instrument(skip(self, dir_path), fields(dir_path = %dir_path.as_ref().display()))]
-    pub fn load_importers(&mut self, dir_path: impl AsRef<Path>) -> Result<(), ImporterDirError> {
-        let dir_path = dir_path.as_ref();
+    pub fn load_importers_dir(&mut self, dir_path: &Path) -> std::io::Result<()> {
+        if self
+            .registry
+            .lock()
+            .unwrap()
+            .data
+            .importers_dirs
+            .iter()
+            .any(|d| **d == *dir_path)
+        {
+            Ok(())
+        } else {
+            let registry_clone = self.registry.clone();
 
-        let dir_path_absolute = dir_path.canonicalize().map_err(|source| ImporterDirError {
-            source,
-            path: dir_path.into(),
-        })?;
+            let mut lock = self.registry.lock().unwrap();
 
-        let dir_path = relative_to(&dir_path_absolute, &self.inner.root);
-
-        if !self.inner.data.importer_dirs.contains(dir_path.as_ref()) {
-            self.inner
-                .importers
-                .load_dir(&dir_path_absolute)
-                .map_err(|source| ImporterDirError {
-                    source,
-                    path: dir_path.clone().into(),
-                })?;
-            self.inner.data.importer_dirs.insert(dir_path.into());
+            match lock.importers.load_importers_dir(dir_path, &registry_clone) {
+                Ok(()) => {
+                    lock.data.importers_dirs.push(dir_path.into());
+                    Ok(())
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "Failed to load importers from '{}'. {:#}",
+                        dir_path.display(),
+                        err
+                    );
+                    Err(err)
+                }
+            }
         }
-        Ok(())
     }
 
     /// Import asset into goods instance
     pub fn store(
-        &mut self,
+        &self,
         source: impl AsRef<Path>,
-        importer: &str,
+        source_format: &str,
+        native_format: &str,
         tags: &[&str],
     ) -> Result<Uuid, StoreError> {
-        let source = source.as_ref();
+        let source_absolute;
+        let mut source = source.as_ref();
 
-        let source = if source.is_relative() {
-            source
+        if source.is_relative() {
+            source_absolute = source
                 .canonicalize()
                 .map_err(|err| StoreError::SourceIoError {
                     path: source.into(),
                     source: err,
-                })?
-                .into()
-        } else {
-            source.into()
-        };
+                })?;
+            source = &source_absolute;
+        }
 
-        self.inner.store(source, importer, tags)
+        Registry::store(&self.registry, &source, source_format, native_format, tags)
     }
 
     /// Fetches asset in native format.
     /// Performs conversion if native format is absent or out of date.
     #[tracing::instrument(skip(self))]
     pub fn fetch(&mut self, uuid: &Uuid) -> Result<AssetData, FetchError> {
-        Ok(self.fetch_impl(uuid, 0)?.unwrap())
+        match Registry::fetch(&self.registry, uuid, 0)? {
+            None => unreachable!(),
+            Some(mut info) => {
+                let mut bytes = Vec::new();
+                info.native_file.read_to_end(&mut bytes).map_err(|source| {
+                    FetchError::NativeIoError {
+                        source,
+                        path: info.native_path.to_path_buf().into(),
+                    }
+                })?;
+
+                Ok(AssetData {
+                    bytes: bytes.into_boxed_slice(),
+                    version: info.version,
+                })
+            }
+        }
     }
 
     /// Fetches asset in native format.
@@ -362,26 +378,197 @@ impl Treasury {
         uuid: &Uuid,
         version: u64,
     ) -> Result<Option<AssetData>, FetchError> {
-        self.fetch_impl(uuid, version + 1)
+        match Registry::fetch(&self.registry, uuid, version + 1)? {
+            None => Ok(None),
+            Some(mut info) => {
+                let mut bytes = Vec::new();
+                info.native_file.read_to_end(&mut bytes).map_err(|source| {
+                    FetchError::NativeIoError {
+                        source,
+                        path: info.native_path.to_path_buf().into(),
+                    }
+                })?;
+
+                Ok(Some(AssetData {
+                    bytes: bytes.into_boxed_slice(),
+                    version: info.version,
+                }))
+            }
+        }
     }
 
-    fn fetch_impl(
-        &mut self,
+    /// Returns assets information.
+    #[tracing::instrument(skip(self, tags))]
+    pub fn list<'a>(
+        &self,
+        mut tags: impl Iterator<Item = &'a str>,
+        native_format: Option<&str>,
+    ) -> Vec<Asset> {
+        let lock = self.registry.lock().unwrap();
+
+        lock.data
+            .assets
+            .iter()
+            .filter(|a| {
+                if let Some(native_format) = native_format {
+                    if a.native_format() != native_format {
+                        return false;
+                    }
+                }
+
+                tags.all(|tag| a.tags().iter().any(|t| **t == *tag))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Returns assets information.
+    #[tracing::instrument(skip(self))]
+    pub fn remove<'a>(&self, uuid: Uuid) {
+        let mut lock = self.registry.lock().unwrap();
+
+        if let Some(index) = lock.data.assets.iter().position(|a| a.uuid() == uuid) {
+            let asset = &lock.data.assets[index];
+            if let Err(err) = std::fs::remove_dir(asset.native_absolute()) {
+                tracing::error!("Failed to remove native asset file '{}'", err);
+            }
+            lock.data.assets.remove(index);
+        }
+    }
+}
+
+pub(crate) struct FetchInfo {
+    pub native_path: Box<Path>,
+    pub native_file: std::fs::File,
+    pub version: u64,
+}
+
+impl Registry {
+    fn save(me: &Mutex<Self>) -> Result<(), SaveError> {
+        let lock = me.lock().unwrap();
+        let treasury_path = lock.root.join(".treasury/manifest.json");
+        let file =
+            std::fs::File::create(&treasury_path).map_err(|source| SaveError::GoodsOpenError {
+                source,
+                path: treasury_path.clone().into(),
+            })?;
+        serde_json::to_writer(file, &lock.data).map_err(|source| SaveError::JsonError {
+            source,
+            path: treasury_path.into(),
+        })
+    }
+
+    pub(crate) fn store(
+        me: &Mutex<Self>,
+        source: &Path,
+        source_format: &str,
+        native_format: &str,
+        tags: &[&str],
+    ) -> Result<Uuid, StoreError> {
+        debug_assert!(source.is_absolute());
+
+        let mut lock = me.lock().unwrap();
+
+        let source = relative_to(source, &lock.root)
+            .into_owned()
+            .into_boxed_path();
+
+        if let Some(asset) = lock.data.assets.iter().find(|a| {
+            *a.source() == *source
+                && a.source_format() == source_format
+                && a.native_format() == native_format
+        }) {
+            tracing::trace!("Already imported");
+            return Ok(asset.uuid());
+        }
+
+        tracing::debug!(
+            "Importing {} as {} @ {}",
+            source_format,
+            native_format,
+            source.display()
+        );
+
+        let uuid = loop {
+            let uuid = Uuid::new_v4();
+            if !lock.data.assets.iter().any(|a| a.uuid() == uuid) {
+                break uuid;
+            }
+        };
+
+        match lock.importers.get_importer(source_format, native_format) {
+            None => Err(StoreError::ImporterNotFound {
+                source_format: source_format.to_owned(),
+                native_format: native_format.to_owned(),
+            }),
+            Some(importer_entry) => {
+                tracing::trace!("Importer found. {}", importer_entry.name());
+
+                let source_absolute = lock.root.join(&*source);
+                let native_absolute = lock
+                    .root
+                    .join(".treasury")
+                    .join(uuid.to_hyphenated().to_string());
+                let native_tmp_path = native_absolute.with_extension("tmp");
+
+                let result = importer_entry.import(&source_absolute, &native_tmp_path, lock);
+
+                if let Err(err) = result {
+                    return Err(StoreError::ImportError { source: err });
+                }
+
+                tracing::trace!("Imported successfully");
+                if let Err(source) = std::fs::rename(&native_tmp_path, &native_absolute) {
+                    tracing::error!(
+                        "Failed to rename '{}' to '{}'",
+                        native_tmp_path.display(),
+                        native_absolute.display(),
+                    );
+
+                    return Err(StoreError::NativeIoError {
+                        path: native_absolute.into(),
+                        source,
+                    });
+                }
+
+                lock = me.lock().unwrap();
+                lock.data.assets.push(Asset::new(
+                    uuid,
+                    source,
+                    source_format.into(),
+                    native_format.into(),
+                    tags.iter().map(|&tag| tag.into()).collect(),
+                    native_absolute.into(),
+                    source_absolute.into(),
+                ));
+
+                tracing::info!("Asset '{}' registered", uuid);
+                drop(lock);
+                let _ = Self::save(me);
+
+                Ok(uuid)
+            }
+        }
+    }
+
+    pub(crate) fn fetch(
+        me: &Mutex<Self>,
         uuid: &Uuid,
         next_version: u64,
-    ) -> Result<Option<AssetData>, FetchError> {
-        match self.inner.assets_by_uuid.get(uuid) {
-            None => Err(FetchError::NotFound),
-            Some(&index) => {
-                let mut asset = &self.inner.data.assets[index];
+    ) -> Result<Option<FetchInfo>, FetchError> {
+        let mut lock = me.lock().unwrap();
 
-                let mut native_file =
-                    std::fs::File::open(asset.native_absolute()).map_err(|source| {
-                        FetchError::NativeIoError {
-                            source,
-                            path: asset.native_absolute().to_path_buf().into(),
-                        }
-                    })?;
+        match lock.data.assets.iter().position(|a| a.uuid() == *uuid) {
+            None => Err(FetchError::NotFound),
+            Some(index) => {
+                let mut asset = &lock.data.assets[index];
+                let mut native_path = asset.native_absolute();
+                let mut native_file = std::fs::File::open(native_path).map_err(|source| {
+                    FetchError::NativeIoError {
+                        source,
+                        path: native_path.to_path_buf().into(),
+                    }
+                })?;
 
                 let native_modified =
                     native_file
@@ -389,7 +576,7 @@ impl Treasury {
                         .and_then(|m| m.modified())
                         .map_err(|source| FetchError::NativeIoError {
                             source,
-                            path: asset.native_absolute().to_path_buf().into(),
+                            path: native_path.to_path_buf().into(),
                         })?;
 
                 if let Ok(source_modified) =
@@ -398,48 +585,65 @@ impl Treasury {
                     if native_modified < source_modified {
                         tracing::trace!("Native asset file is out-of-date. Perform reimport");
 
-                        match self.inner.importers.get_importer(asset.importer()) {
+                        match lock
+                            .importers
+                            .get_importer(asset.source_format(), asset.native_format())
+                        {
                             None => {
                                 tracing::warn!(
-                                    "Importer '{}' not found, asset '{}@{}' cannot be updated",
-                                    asset.importer(),
+                                    "Importer from '{}' to '{}' not found, asset '{}@{}' cannot be updated",
+                                    asset.source_format(),
+                                    asset.native_format(),
                                     asset.uuid(),
                                     asset.source().display(),
                                 );
                             }
                             Some(importer) => {
-                                let native_path_tmp = asset.native_absolute().with_extension("tmp");
+                                let native_tmp_path = native_path.with_extension("tmp");
 
                                 let result = importer.import(
-                                    &asset.source_absolute().clone(),
-                                    &native_path_tmp,
-                                    &mut self.inner,
+                                    &asset.source_absolute().to_owned(),
+                                    &native_tmp_path,
+                                    lock,
                                 );
-                                asset = &self.inner.data.assets[index];
+
+                                lock = me.lock().unwrap();
+                                asset = &lock.data.assets[index];
+
+                                native_path = asset.native_absolute();
 
                                 match result {
                                     Ok(()) => {
-                                        match std::fs::rename(
-                                            &native_path_tmp,
-                                            asset.native_absolute(),
-                                        ) {
+                                        match std::fs::rename(&native_tmp_path, native_path) {
                                             Ok(()) => {
                                                 tracing::trace!("Native file updated");
                                             }
                                             Err(err) => {
                                                 tracing::warn!(
                                                             "Failed to copy native file '{}' from '{}'. {:#}",
-                                                            asset.native_absolute().display(),
-                                                            native_path_tmp.display(),
+                                                            native_path.display(),
+                                                            native_tmp_path.display(),
                                                             err
                                                         )
                                             }
                                         }
+                                        match std::fs::File::open(native_path) {
+                                            Ok(file) => native_file = file,
+                                            Err(err) => {
+                                                tracing::warn!(
+                                                    "Failed to reopen native file '{}'. {:#}",
+                                                    native_path.display(),
+                                                    err,
+                                                );
+                                            }
+                                        }
                                     }
-                                    Err(err) => tracing::warn!(
-                                        "Native file reimport failed '{:#}'. Fallback to old file",
-                                        err
-                                    ),
+                                    Err(err) => {
+                                        tracing::warn!(
+                                            "Native file reimport failed '{:#}'. Fallback to old file",
+                                            err,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -450,144 +654,22 @@ impl Treasury {
                     tracing::warn!("Failed to determine if native file is up-to-date");
                 }
 
-                if next_version > version_from_systime(native_modified) {
+                let version = version_from_systime(native_modified);
+                if next_version > version {
                     tracing::trace!("Native asset is not updated");
                     return Ok(None);
                 }
 
-                let mut native_data = Vec::new();
-                native_file
-                    .read_to_end(&mut native_data)
-                    .map_err(|source| FetchError::NativeIoError {
-                        source,
-                        path: asset.native_absolute().to_path_buf().into(),
-                    })?;
+                let native_path = lock.data.assets[index].native_absolute().into();
 
-                return Ok(Some(AssetData {
-                    bytes: native_data.into_boxed_slice(),
-                    version: version_from_systime(native_modified),
-                }));
+                Ok(Some(FetchInfo {
+                    native_path,
+                    native_file,
+                    version,
+                }))
             }
         }
     }
-}
-
-impl Inner {
-    fn store(
-        &mut self,
-        source: Box<Path>,
-        importer: &str,
-        tags: &[&str],
-    ) -> Result<Uuid, StoreError> {
-        debug_assert!(source.as_ref().is_absolute());
-        let source = Arc::<Path>::from(relative_to(&source, &self.root));
-
-        let importer: Arc<str> = importer.into();
-
-        if let Some(&index) = self
-            .assets_by_source_importer
-            .get(&(source.clone(), importer.clone()))
-        {
-            tracing::trace!("Already imported");
-            return Ok(self.data.assets[index].uuid());
-        }
-
-        let tags = tags
-            .iter()
-            .map(|&tag| {
-                self.tags.get(tag).cloned().unwrap_or_else(|| {
-                    let tag = Arc::from(tag);
-                    self.tags.insert(Arc::clone(&tag));
-                    tag
-                })
-            })
-            .collect();
-
-        let uuid = loop {
-            let uuid = Uuid::new_v4();
-            if !self.assets_by_uuid.contains_key(&uuid) {
-                break uuid;
-            }
-        };
-
-        match self.importers.get_importer(&*importer) {
-            None => Err(StoreError::ImporterNotFound {
-                importer: importer.as_ref().to_owned(),
-            }),
-            Some(importer_entry) => {
-                tracing::trace!("Importer found");
-
-                let source_absolute = self.root.join(&*source);
-                let native_absolute = self.root.join(uuid.to_hyphenated().to_string());
-                let native_path_tmp = native_absolute.with_extension("tmp");
-
-                let result = importer_entry.import(&source_absolute, &native_path_tmp, self);
-
-                if let Err(err) = result {
-                    tracing::error!("Importer failed");
-                    match err.downcast::<StoreError>() {
-                        Ok(err) => return Err(*err),
-                        Err(err) => return Err(StoreError::ImportError { source: err }),
-                    }
-                }
-
-                tracing::trace!("Imported successfully");
-                if let Err(source) = std::fs::rename(native_path_tmp, &native_absolute) {
-                    return Err(StoreError::NativeIoError {
-                        path: native_absolute.into(),
-                        source,
-                    });
-                }
-
-                self.data.assets.push(Asset::new(
-                    uuid,
-                    source.clone(),
-                    importer.clone(),
-                    tags,
-                    source_absolute.into(),
-                    native_absolute.into(),
-                ));
-
-                self.assets_by_uuid.insert(uuid, self.data.assets.len() - 1);
-
-                self.assets_by_source_importer
-                    .insert((source, importer), self.data.assets.len() - 1);
-
-                tracing::info!("Asset '{}' registered", uuid);
-                Ok(uuid)
-            }
-        }
-    }
-}
-
-impl treasury_import::Registry for Inner {
-    fn store(
-        &mut self,
-        source: &Path,
-        importer: &str,
-    ) -> Result<Uuid, Box<dyn Error + Send + Sync>> {
-        match self.store(source.into(), importer, &[]) {
-            Ok(uuid) => Ok(uuid),
-            Err(err) => Err(Box::new(err)),
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum LoadImportersError {
-    #[error("Failed to open importer library")]
-    Dlopen(#[from] dlopen::Error),
-
-    #[error("Not a goods importer library")]
-    InvalidLibrary,
-
-    #[error(
-        "Magic number from importer library '{magic:0x}' does not match expected value '0xe11c9a87'"
-    )]
-    WrongMagic { magic: u32 },
-
-    #[error("Version of `goods-import` does not match")]
-    WrongVersion,
 }
 
 fn relative_to<'a>(path: &'a Path, root: &Path) -> std::borrow::Cow<'a, Path> {
@@ -627,3 +709,31 @@ fn version_from_systime(systime: SystemTime) -> u64 {
         .unwrap()
         .as_millis() as u64
 }
+
+// fn replace_source_tmp(source_path: &Path, source_tmp_path: &Path) -> std::io::Result<()> {
+//     if source_tmp_path.exists() {
+//         std::fs::remove_file(source_tmp_path)?;
+//     }
+
+//     match std::fs::hard_link(source_path, source_tmp_path) {
+//         Ok(()) => Ok(()),
+//         Err(err) => {
+//             tracing::debug!("Hard-link to source path '{}' cannot be created at '{}'. {:#}. Fallback to copy instead", source_path.display(), source_tmp_path.display(), err);
+//             std::fs::copy(source_path, source_tmp_path)?;
+//             Ok(())
+//         }
+//     }
+// }
+
+// fn delete_source_tmp(source_path: &Path, source_tmp_path: &Path) {
+//     if source_tmp_path.exists() {
+//         if let Err(err) = std::fs::remove_file(source_tmp_path) {
+//             tracing::warn!(
+//                 "Failed to cleanup source's '{}' copy at '{}'. {:#}",
+//                 source_path.display(),
+//                 source_tmp_path.display(),
+//                 err
+//             );
+//         }
+//     }
+// }

@@ -202,6 +202,7 @@ pub struct Loader {
 }
 
 enum StateTyped<A: Asset> {
+    #[allow(dead_code)]
     Asset {
         asset: A,
         version: u64,

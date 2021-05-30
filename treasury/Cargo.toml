@@ -14,7 +14,8 @@ tracing = { version = "0.1", features = ["attributes"] }
 uuid = { version = "0.8", features = ["v4", "serde"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
-bincode = "1.0"
 thiserror = "1.0"
-dlopen = "0.1"
 eyre = "0.6"
+
+wasmer = "1.0"
+wasmer-wasi = "1.0"

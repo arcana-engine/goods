@@ -17,4 +17,4 @@ mod asset;
 mod import;
 mod treasury;
 
-pub use self::treasury::*;
+pub use {self::treasury::*, treasury_import::*};

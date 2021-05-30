@@ -26,4 +26,4 @@ num_cpus = "1.0"
 tokio = { version =  "1.0", features = ["rt", "sync", "parking_lot"] }
 
 [workspace]
-members = ["dummy", "cli", "treasury"]
+members = ["cli", "treasury", "import", "plugin"]
