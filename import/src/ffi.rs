@@ -217,7 +217,7 @@ impl Registry for RegistryFFI {
             {
                 use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
 
-                let path = OsString::from_wide(&path_array[..path_len]);
+                let path = OsString::from_wide(&path_array[..len.min(BUFFER_LEN)]);
                 Ok(PathBuf::from(path).into_boxed_path())
             }
         }

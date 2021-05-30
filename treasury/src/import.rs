@@ -21,6 +21,11 @@ pub struct ImporterOpaque {
 const WASM_IMPORTERS_INITIAL_COUNT: u32 = 64;
 const ERROR_BUFFER_LEN: u32 = 2048;
 
+#[cfg(any(unix, target_os = "wasi"))]
+const OS_CHAR_SIZE: u32 = 1;
+#[cfg(windows)]
+const OS_CHAR_SIZE: u32 = 2;
+
 pub(crate) struct Importers {
     map: HashMap<Box<str>, HashMap<Box<str>, Arc<WasmImporter>>>,
     store: Store,
@@ -242,9 +247,9 @@ type NameSourceNativeFunctionArgs = (
 type ImportFunctionArgs = (
     WasmPtr<fn()>,
     WasmPtr<ImporterOpaque>,
-    WasmPtr<u8, Array>,
+    WasmOsStrPtr,
     u32,
-    WasmPtr<u8, Array>,
+    WasmOsStrPtr,
     u32,
     WasmPtr<u8, Array>,
     u32,
@@ -328,30 +333,43 @@ impl WasmImporter {
 
         #[cfg(unix)]
         use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
-
+        #[cfg(target_os = "wasi")]
+        use std::{ffi::OsStr, os::wasi::ffi::OsStrExt};
         #[cfg(windows)]
         use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
 
         let source_path = OsStr::new(source_path);
         let native_path = OsStr::new(native_path);
 
+        #[cfg(any(unix, target_os = "wasi"))]
         let source_path = source_path.as_bytes();
+
+        #[cfg(any(unix, target_os = "wasi"))]
         let native_path = native_path.as_bytes();
 
-        let ptr = self
-            .state
-            .alloc
-            .call(
-                source_path.len() as u32 + native_path.len() as u32 + ERROR_BUFFER_LEN,
-                1,
-            )
-            .unwrap();
+        #[cfg(windows)]
+        let source_path = source_path.encode_wide().collect::<Vec<_>>();
+        #[cfg(windows)]
+        let source_path = &source_path[..];
 
-        let source_ptr = WasmPtr::<u8, Array>::new(ptr.offset());
-        let native_ptr = WasmPtr::<u8, Array>::new(ptr.offset() + source_path.len() as u32);
+        #[cfg(windows)]
+        let native_path = native_path.encode_wide().collect::<Vec<_>>();
+        #[cfg(windows)]
+        let native_path = &native_path[..];
+
+        let size = OS_CHAR_SIZE * source_path.len() as u32
+            + OS_CHAR_SIZE * native_path.len() as u32
+            + ERROR_BUFFER_LEN;
+
+        let ptr = self.state.alloc.call(size, OS_CHAR_SIZE).unwrap();
+
+        let source_ptr = WasmOsStrPtr::new(ptr.offset());
+        let native_ptr = WasmOsStrPtr::new(ptr.offset() + OS_CHAR_SIZE * source_path.len() as u32);
 
         let error_ptr = WasmPtr::<u8, Array>::new(
-            ptr.offset() + source_path.len() as u32 + native_path.len() as u32,
+            ptr.offset()
+                + OS_CHAR_SIZE * source_path.len() as u32
+                + OS_CHAR_SIZE * native_path.len() as u32,
         );
 
         let slice = source_ptr
@@ -360,7 +378,7 @@ impl WasmImporter {
         slice
             .iter()
             .zip(source_path)
-            .for_each(|(cell, byte)| cell.set(*byte));
+            .for_each(|(cell, c)| cell.set(*c));
 
         let slice = native_ptr
             .deref(&self.state.memory, 0, native_path.len() as u32)
@@ -369,7 +387,7 @@ impl WasmImporter {
         slice
             .iter()
             .zip(native_path)
-            .for_each(|(cell, byte)| cell.set(*byte));
+            .for_each(|(cell, c)| cell.set(*c));
 
         let result = self.state.importer_import_trampoline.call(
             self.ffi.import,
@@ -386,8 +404,10 @@ impl WasmImporter {
             let len = result.abs() as u32;
             let error = error_ptr.get_utf8_string(&self.state.memory, len).unwrap();
 
+            self.state.dealloc.call(ptr, size, OS_CHAR_SIZE)?;
             Err(eyre::eyre!("Importer error: '{}'", error))
         } else {
+            self.state.dealloc.call(ptr, size, OS_CHAR_SIZE)?;
             debug_assert_eq!(result, 0);
             Ok(())
         }
@@ -429,6 +449,12 @@ fn treasury_registry_store(
 
     #[cfg(any(unix, target_os = "wasi"))]
     let source = OsStr::from_bytes(&source);
+
+    #[cfg(windows)]
+    let source = OsString::from_wide(&source);
+
+    #[cfg(windows)]
+    let source = &source;
 
     let source_format = source_format_ptr
         .deref(env.memory_ref().unwrap(), 0, source_format_len)
@@ -515,7 +541,7 @@ fn treasury_registry_fetch(
         Ok(None) => unreachable!(),
         Ok(Some(info)) => {
             let native_path = info.native_path;
-            let native_path = OsStr::new(&*native_path).as_bytes();
+            let native_path = OsStr::new(&*native_path);
 
             if path_len < native_path.len() as u32 {
                 let err = b"Path buffer is too small";
@@ -533,9 +559,15 @@ fn treasury_registry_fetch(
 
                 let path = path_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
 
+                #[cfg(any(unix, target_os = "wasi"))]
                 path.iter()
-                    .zip(native_path)
-                    .for_each(|(cell, byte)| cell.set(*byte));
+                    .zip(native_path.as_bytes())
+                    .for_each(|(cell, c)| cell.set(*c));
+
+                #[cfg(windows)]
+                path.iter()
+                    .zip(native_path.encode_wide())
+                    .for_each(|(cell, c)| cell.set(*c));
 
                 len as i32
             }
