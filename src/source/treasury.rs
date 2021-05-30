@@ -47,7 +47,7 @@ impl Source for TreasurySource {
                 })),
                 Err(treasury::FetchError::NotFound) => Ok(None),
                 Err(treasury::FetchError::NativeIoError { source, path }) => {
-                    Err(TreasuryFetchError { source, path })
+                    Err(TreasuryFetchError { path, source })
                 }
             };
             result
@@ -66,7 +66,7 @@ impl Source for TreasurySource {
                 })),
                 Err(treasury::FetchError::NotFound) => Ok(None),
                 Err(treasury::FetchError::NativeIoError { source, path }) => {
-                    Err(TreasuryFetchError { source, path })
+                    Err(TreasuryFetchError { path, source })
                 }
             };
             result

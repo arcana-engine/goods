@@ -27,20 +27,17 @@ macro_rules! assets_inner {
         {
             let sources = $sources;
             let random_state = $random_state;
-            (move || -> Arc<Inner<[Arc<Mutex<HashMap<Key, AssetEntry>>>]>> {
-                let shards: Vec<_> = (0..$count * 4)
-                    .map(|_| Arc::new(Mutex::new(HashMap::new())))
-                    .collect();
+            let shards: Vec<_> = (0..$count * 4)
+                .map(|_| Arc::new(Mutex::new(HashMap::new())))
+                .collect();
 
-                Arc::new(Inner {
-                    sources,
-                    random_state,
-                    cache: std::convert::TryInto::<
-                        [Arc<Mutex<HashMap<Key, AssetEntry>>>; $count * 4],
-                    >::try_into(shards)
+            let shards: Arc<Inner<[Shard]>> = Arc::new(Inner {
+                sources,
+                random_state,
+                cache: std::convert::TryInto::<[Shard; $count * 4]>::try_into(shards)
                     .unwrap_or_else(|_| panic!()),
-                })
-            })()
+            });
+            shards
         }
     }};
 }
@@ -125,6 +122,12 @@ pub struct LoaderBuilder {
     sources: Vec<Box<dyn AnySource>>,
 }
 
+impl Default for LoaderBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoaderBuilder {
     /// Returns new [`LoaderBuilder`] without asset sources.
     pub fn new() -> Self {
@@ -180,14 +183,14 @@ impl LoaderBuilder {
 
         let inner = match self.num_shards {
             0..=1 => assets_inner!(sources, random_state, 1),
-            0..=2 => assets_inner!(sources, random_state, 2),
-            0..=4 => assets_inner!(sources, random_state, 4),
-            0..=8 => assets_inner!(sources, random_state, 8),
-            0..=16 => assets_inner!(sources, random_state, 16),
-            0..=32 => assets_inner!(sources, random_state, 32),
-            0..=64 => assets_inner!(sources, random_state, 64),
-            0..=128 => assets_inner!(sources, random_state, 128),
-            0..=256 => assets_inner!(sources, random_state, 256),
+            2..=2 => assets_inner!(sources, random_state, 2),
+            3..=4 => assets_inner!(sources, random_state, 4),
+            5..=8 => assets_inner!(sources, random_state, 8),
+            9..=16 => assets_inner!(sources, random_state, 16),
+            17..=32 => assets_inner!(sources, random_state, 32),
+            33..=64 => assets_inner!(sources, random_state, 64),
+            65..=128 => assets_inner!(sources, random_state, 128),
+            129..=256 => assets_inner!(sources, random_state, 256),
             _ => assets_inner!(sources, random_state, 512),
         };
 
@@ -195,10 +198,12 @@ impl LoaderBuilder {
     }
 }
 
+type Shard = Arc<Mutex<HashMap<Key, AssetEntry, RandomState>>>;
+
 /// Virtual storage for all available assets.
 #[derive(Clone)]
 pub struct Loader {
-    inner: Arc<Inner<[Arc<Mutex<HashMap<Key, AssetEntry, RandomState>>>]>>,
+    inner: Arc<Inner<[Shard]>>,
 }
 
 enum StateTyped<A: Asset> {
@@ -291,20 +296,20 @@ where
                                             source: *source,
                                         };
                                         drop(locked_shard);
-                                        self.0 = AssetResultInner::Asset(asset.clone());
+                                        self.0 = AssetResultInner::Asset(asset);
                                     }
                                     Err(err) => {
                                         let err = Error::new(err);
                                         entry.get_mut().state = StateErased::Error(err.clone());
                                         drop(locked_shard);
-                                        self.0 = AssetResultInner::Error(err.clone());
+                                        self.0 = AssetResultInner::Error(err);
                                     }
                                 },
                                 None => {
                                     let err = Error::new(AssetResultPoisoned);
                                     entry.get_mut().state = StateErased::Error(err.clone());
                                     drop(locked_shard);
-                                    self.0 = AssetResultInner::Error(err.clone());
+                                    self.0 = AssetResultInner::Error(err);
                                 }
                             },
                             StateTyped::Asset { asset, .. } => {
@@ -516,7 +521,7 @@ impl Loader {
                 // Register query
                 let _ = entry.insert_hashed_nocheck(
                     key_hash,
-                    asset_key.clone(),
+                    asset_key,
                     AssetEntry {
                         state: StateErased::Unloaded,
                         wakers: Vec::new(),

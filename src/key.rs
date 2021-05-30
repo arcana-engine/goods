@@ -7,7 +7,7 @@ use {
     uuid::Uuid,
 };
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Key {
     type_id: TypeId,
     uuid: Uuid,
@@ -33,11 +33,4 @@ where
 {
     TypeId::of::<A>().hash(state);
     uuid.hash(state);
-}
-
-impl Hash for Key {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.type_id.hash(state);
-        self.uuid.hash(state);
-    }
 }

@@ -46,7 +46,7 @@ pub fn asset(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 #[proc_macro_derive(AssetField, attributes(external, container, serde))]
 pub fn asset_field(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    match parse(item).and_then(|parsed| asset_field_impl(parsed)) {
+    match parse(item).and_then(asset_field_impl) {
         Ok(tokens) => tokens,
         Err(error) => error.into_compile_error(),
     }
@@ -279,7 +279,7 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                     }
                 }
             }
-            2 | _ => {
+            _ => {
                 return Err(syn::Error::new_spanned(
                     &field.attrs[asset_attributes[1]],
                     "Only one of two attributes 'external' or 'container' can be specified",
@@ -295,8 +295,8 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
         futures,
         decoded,
         decode_error,
-        build_error,
         decode_field_errors,
+        build_error,
         build_field_errors,
         builder_bounds,
         info_fields,
