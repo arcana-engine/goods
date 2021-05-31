@@ -272,7 +272,10 @@ impl Treasury {
         let me = &mut *lock;
 
         for dir_path in &me.data.importers_dirs {
-            if let Err(err) = me.importers.load_importers_dir(dir_path, &registry_clone) {
+            if let Err(err) = me
+                .importers
+                .load_importers_dir(&me.root.join(dir_path), &registry_clone)
+            {
                 tracing::error!(
                     "Failed to load importers from '{}'. {:#}",
                     dir_path.display(),
@@ -307,7 +310,11 @@ impl Treasury {
 
             match lock.importers.load_importers_dir(dir_path, &registry_clone) {
                 Ok(()) => {
-                    lock.data.importers_dirs.push(dir_path.into());
+                    let dir_path = relative_to(dir_path, &lock.root);
+
+                    lock.data
+                        .importers_dirs
+                        .push(dir_path.into_owned().into_boxed_path());
                     Ok(())
                 }
                 Err(err) => {
@@ -328,7 +335,7 @@ impl Treasury {
         source: impl AsRef<Path>,
         source_format: &str,
         native_format: &str,
-        tags: &[&str],
+        tags: &[impl AsRef<str>],
     ) -> Result<Uuid, StoreError> {
         let source_absolute;
         let mut source = source.as_ref();
@@ -399,11 +406,7 @@ impl Treasury {
 
     /// Returns assets information.
     #[tracing::instrument(skip(self, tags))]
-    pub fn list<'a>(
-        &self,
-        mut tags: impl Iterator<Item = &'a str>,
-        native_format: Option<&str>,
-    ) -> Vec<Asset> {
+    pub fn list(&self, tags: &[impl AsRef<str>], native_format: Option<&str>) -> Vec<Asset> {
         let lock = self.registry.lock().unwrap();
 
         lock.data
@@ -416,7 +419,10 @@ impl Treasury {
                     }
                 }
 
-                tags.all(|tag| a.tags().iter().any(|t| **t == *tag))
+                tags.iter().all(|tag| {
+                    let tag = tag.as_ref();
+                    a.tags().iter().any(|t| **t == *tag)
+                })
             })
             .cloned()
             .collect()
@@ -452,7 +458,7 @@ impl Registry {
                 source,
                 path: treasury_path.clone().into(),
             })?;
-        serde_json::to_writer(file, &lock.data).map_err(|source| SaveError::JsonError {
+        serde_json::to_writer_pretty(file, &lock.data).map_err(|source| SaveError::JsonError {
             source,
             path: treasury_path.into(),
         })
@@ -463,7 +469,7 @@ impl Registry {
         source: &Path,
         source_format: &str,
         native_format: &str,
-        tags: &[&str],
+        tags: &[impl AsRef<str>],
     ) -> Result<Uuid, StoreError> {
         debug_assert!(source.is_absolute());
 
@@ -537,7 +543,7 @@ impl Registry {
                     source,
                     source_format.into(),
                     native_format.into(),
-                    tags.iter().map(|&tag| tag.into()).collect(),
+                    tags.iter().map(|tag| tag.as_ref().into()).collect(),
                     native_absolute.into(),
                     source_absolute.into(),
                 ));
