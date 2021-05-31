@@ -38,20 +38,20 @@ impl Display for Asset {
         if f.alternate() {
             write!(
                 f,
-                "{{\n\t{}\n\t {} as {}\n\t@ {} }}",
+                "{{\n  uuid: {}\n  source: {}\n  source_format: {}\n  native_format: {}\n}}",
                 self.uuid,
+                self.source.display(),
                 self.source_format,
                 self.native_format,
-                self.source.display()
             )
         } else {
             write!(
                 f,
-                "{{ {} : '{}' as '{}' @ '{}' }}",
+                "{{ {} <- '{}' : '{}' as '{}' }}",
                 self.uuid,
+                self.source.display(),
                 self.source_format,
                 self.native_format,
-                self.source.display()
             )
         }
     }

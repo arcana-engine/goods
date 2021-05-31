@@ -14,6 +14,7 @@ pub trait Registry {
         source: &Path,
         source_format: &str,
         native_format: &str,
+        tags: &[&str],
     ) -> eyre::Result<Uuid>;
 
     /// Returns native path to asset with specified uuid.

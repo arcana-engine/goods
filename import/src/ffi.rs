@@ -127,6 +127,7 @@ impl Registry for RegistryFFI {
         source: &Path,
         source_format: &str,
         native_format: &str,
+        tags: &[&str],
     ) -> eyre::Result<Uuid> {
         use std::ffi::OsStr;
 
@@ -150,6 +151,10 @@ impl Registry for RegistryFFI {
 
         let mut result_array = [0u8; BUFFER_LEN];
 
+        let tag_count = tags.len();
+        let tag_ptrs = tags.iter().map(|t| str::as_ptr(t)).collect::<Vec<_>>();
+        let tag_lens = tags.iter().map(|t| str::len(t)).collect::<Vec<_>>();
+
         let result = unsafe {
             treasury_registry_store(
                 source.as_ptr(),
@@ -158,6 +163,9 @@ impl Registry for RegistryFFI {
                 source_format.len(),
                 native_format.as_ptr(),
                 native_format.len(),
+                tag_ptrs.as_ptr(),
+                tag_lens.as_ptr(),
+                tag_count,
                 result_array.as_mut_ptr(),
                 BUFFER_LEN,
             )
@@ -233,6 +241,9 @@ extern "C" {
         source_format_len: usize,
         native_format_ptr: *const u8,
         native_format_len: usize,
+        tag_ptrs: *const *const u8,
+        tag_lens: *const usize,
+        tag_count: usize,
         result_ptr: *mut u8,
         result_len: usize,
     ) -> isize;

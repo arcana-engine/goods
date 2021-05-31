@@ -49,6 +49,9 @@ struct Store {
     /// Native format.
     #[clap()]
     native_format: String,
+
+    #[clap(short, long)]
+    tags: Vec<String>,
 }
 
 /// A subcommand for registering assets
@@ -67,11 +70,11 @@ struct Fetch {
 #[derive(Clap)]
 struct List {
     /// Filter by importer.
-    #[clap()]
+    #[clap(short, long)]
     native_format: Option<String>,
 
     /// Filter by importer.
-    #[clap()]
+    #[clap(short, long)]
     tags: Vec<String>,
 }
 
@@ -136,7 +139,7 @@ pub fn main() -> eyre::Result<()> {
                 store.source_path,
                 &store.source_format,
                 &store.native_format,
-                &[],
+                &store.tags,
             )?;
 
             treasury.save()?;
@@ -166,13 +169,14 @@ pub fn main() -> eyre::Result<()> {
         }
         SubCommand::List(list) => {
             let treasury = Treasury::open(&opts.root)?;
-            let assets = treasury.list(
-                list.tags.iter().map(|s| &**s),
-                list.native_format.as_deref(),
-            );
+            let assets = treasury.list(&list.tags, list.native_format.as_deref());
             println!("{} assets found", assets.len());
             for asset in assets {
-                println!("{:#}", asset);
+                if opts.verbose > 0 {
+                    println!("{:#}", asset);
+                } else {
+                    println!("{}", asset);
+                }
             }
         }
         SubCommand::Remove(remove) => {

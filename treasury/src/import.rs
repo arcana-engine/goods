@@ -429,6 +429,9 @@ fn treasury_registry_store(
     source_format_len: u32,
     native_format_ptr: WasmPtr<u8, Array>,
     native_format_len: u32,
+    tag_ptrs: WasmPtr<WasmPtr<u8, Array>, Array>,
+    tag_lens: WasmPtr<u32, Array>,
+    tag_count: u32,
     result_ptr: WasmPtr<u8, Array>,
     result_len: u32,
 ) -> i32 {
@@ -439,11 +442,9 @@ fn treasury_registry_store(
     #[cfg(target_os = "wasi")]
     use std::{ffi::Ostr, os::wasi::ffi::OsStrExt};
 
-    assert!(result_len >= 16);
+    let memory = env.memory_ref().unwrap();
 
-    let source = source_ptr
-        .deref(env.memory_ref().unwrap(), 0, source_len)
-        .unwrap();
+    let source = source_ptr.deref(memory, 0, source_len).unwrap();
 
     let source = source.iter().map(std::cell::Cell::get).collect::<Vec<_>>();
 
@@ -457,7 +458,7 @@ fn treasury_registry_store(
     let source = &source;
 
     let source_format = source_format_ptr
-        .deref(env.memory_ref().unwrap(), 0, source_format_len)
+        .deref(memory, 0, source_format_len)
         .unwrap();
 
     let source_format = source_format
@@ -468,7 +469,7 @@ fn treasury_registry_store(
     let source_format = std::str::from_utf8(&source_format).unwrap();
 
     let native_format = native_format_ptr
-        .deref(env.memory_ref().unwrap(), 0, native_format_len)
+        .deref(memory, 0, native_format_len)
         .unwrap();
 
     let native_format = native_format
@@ -478,28 +479,56 @@ fn treasury_registry_store(
 
     let native_format = std::str::from_utf8(&native_format).unwrap();
 
+    let tag_ptrs = tag_ptrs.deref(memory, 0, tag_count).unwrap();
+    let tag_lens = tag_lens.deref(memory, 0, tag_count).unwrap();
+
+    let tags = tag_ptrs
+        .iter()
+        .zip(tag_lens)
+        .map(|(ptr, len)| ptr.get().get_utf8_string(memory, len.get()).unwrap())
+        .collect::<Vec<_>>();
+
     let result = Registry::store(
         &env.registry.upgrade().unwrap(),
         Path::new(source),
         source_format,
         native_format,
-        &[],
+        &tags,
     );
 
     match result {
-        Ok(uuid) => {
-            let result = result_ptr.deref(env.memory_ref().unwrap(), 0, 16).unwrap();
+        Ok(uuid) if result_len >= 16 => {
+            let result = result_ptr.deref(memory, 0, 16).unwrap();
             result
                 .iter()
                 .zip(uuid.as_bytes())
                 .for_each(|(cell, byte)| cell.set(*byte));
             16
         }
+        Ok(_) => {
+            tracing::error!(
+                "Importer provided to short result buffer. At least 16 bytes long buffer is required for UUID on successful sub-import"
+            );
+
+            let error = b"Too short";
+            let len = result_len.min(error.len() as u32);
+
+            let result = result_ptr.deref(memory, 0, len).unwrap();
+
+            result
+                .iter()
+                .zip(error)
+                .for_each(|(cell, byte)| cell.set(*byte));
+
+            -(len as i32)
+        }
         Err(err) => {
+            tracing::error!("Sub-import failed with. {:#}", err);
+
             let error = format!("{:#}", err);
             let len = result_len.min(error.len() as u32);
 
-            let result = result_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
+            let result = result_ptr.deref(memory, 0, len).unwrap();
 
             result
                 .iter()
@@ -544,6 +573,10 @@ fn treasury_registry_fetch(
             let native_path = OsStr::new(&*native_path);
 
             if path_len < native_path.len() as u32 {
+                tracing::error!(
+                    "Importer provided to short result buffer. At least {} chars long buffer is required.\nImporter should allocate buffer large enough to fit any sensible path length", native_path.len() as u32,
+                );
+
                 let err = b"Path buffer is too small";
                 let len = error_len.min(err.len() as u32);
                 let error = error_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
