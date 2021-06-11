@@ -139,6 +139,7 @@ impl Importers {
             "treasury_importer_name_source_native_trampoline",
         )?;
 
+        #[cfg(any(unix, target_os = "wasi"))]
         let importer_import_trampoline =
             instance.exports.get_native_function::<(
                 WasmPtr<fn()>,
@@ -146,6 +147,19 @@ impl Importers {
                 WasmPtr<u8, Array>,
                 u32,
                 WasmPtr<u8, Array>,
+                u32,
+                WasmPtr<u8, Array>,
+                u32,
+            ), i32>("treasury_importer_import_trampoline")?;
+
+        #[cfg(windows)]
+        let importer_import_trampoline =
+            instance.exports.get_native_function::<(
+                WasmPtr<fn()>,
+                WasmPtr<ImporterOpaque>,
+                WasmPtr<u16, Array>,
+                u32,
+                WasmPtr<u16, Array>,
                 u32,
                 WasmPtr<u8, Array>,
                 u32,
@@ -418,7 +432,7 @@ impl WasmImporter {
 type WasmOsStrPtr = WasmPtr<u8, Array>;
 
 #[cfg(windows)]
-type WasmStrPtr = WasmPtr<u16, Array>;
+type WasmOsStrPtr = WasmPtr<u16, Array>;
 
 #[allow(clippy::too_many_arguments)]
 fn treasury_registry_store(
@@ -438,7 +452,7 @@ fn treasury_registry_store(
     #[cfg(unix)]
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
     #[cfg(windows)]
-    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
     #[cfg(target_os = "wasi")]
     use std::{ffi::Ostr, os::wasi::ffi::OsStrExt};
 
@@ -551,7 +565,7 @@ fn treasury_registry_fetch(
     #[cfg(unix)]
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
     #[cfg(windows)]
-    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
     #[cfg(target_os = "wasi")]
     use std::{ffi::Ostr, os::wasi::ffi::OsStrExt};
 
@@ -600,7 +614,7 @@ fn treasury_registry_fetch(
                 #[cfg(windows)]
                 path.iter()
                     .zip(native_path.encode_wide())
-                    .for_each(|(cell, c)| cell.set(*c));
+                    .for_each(|(cell, c)| cell.set(c));
 
                 len as i32
             }
