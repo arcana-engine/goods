@@ -606,7 +606,7 @@ impl Loader {
                                 }
                             }
                             Ok(None) => {
-                                tracing::warn!("Asset data for `{}` loaded", uuid);
+                                tracing::warn!("Asset data for `{}` is not found", uuid);
 
                                 let mut locked_shard = shard.lock();
                                 let asset_entry = locked_shard
