@@ -147,7 +147,7 @@ impl Registry for RegistryFFI {
         let source = source.encode_wide().collect::<Vec<u16>>();
 
         #[cfg(windows)]
-        let source = &source[..];
+        let source = String::from_utf16(&source[..]).unwrap();
 
         let mut result_array = [0u8; BUFFER_LEN];
 
@@ -223,9 +223,8 @@ impl Registry for RegistryFFI {
 
             #[cfg(windows)]
             {
-                use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
-
-                let path = OsString::from_wide(&path_array[..len.min(BUFFER_LEN)]);
+                use std::path::PathBuf;
+                let path = std::str::from_utf8(&path_array[..len.min(BUFFER_LEN)]).unwrap();
                 Ok(PathBuf::from(path).into_boxed_path())
             }
         }
@@ -234,8 +233,7 @@ impl Registry for RegistryFFI {
 
 extern "C" {
     fn treasury_registry_store(
-        #[cfg(any(unix, target_os = "wasi"))] source_ptr: *const u8,
-        #[cfg(windows)] source_ptr: *const u16,
+        source_ptr: *const u8,
         source_len: usize,
         source_format_ptr: *const u8,
         source_format_len: usize,
@@ -250,8 +248,7 @@ extern "C" {
 
     fn treasury_registry_fetch(
         uuid: *const u8,
-        #[cfg(any(unix, target_os = "wasi"))] path_ptr: *mut u8,
-        #[cfg(windows)] path_ptr: *mut u16,
+        path_ptr: *mut u8,
         path_len: usize,
         error_ptr: *mut u8,
         error_len: usize,

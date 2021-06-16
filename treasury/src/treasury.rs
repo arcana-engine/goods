@@ -52,12 +52,6 @@ pub enum NewError {
     #[error("Goods path '{path}' is invalid")]
     InvalidGoodsPath { path: Box<Path> },
 
-    #[error("Failed to canonicalize root directory '{path}'")]
-    RootDirCanonError {
-        path: Box<Path>,
-        source: std::io::Error,
-    },
-
     #[error("Failed to create root directory '{path}'")]
     RootDirCreateError {
         path: Box<Path>,
@@ -96,12 +90,6 @@ pub enum SaveError {
 pub enum OpenError {
     #[error("Goods path '{path}' is invalid")]
     InvalidGoodsPath { path: Box<Path> },
-
-    #[error("Failed to canonicalize root directory '{path}'")]
-    RootDirCanonError {
-        path: Box<Path>,
-        source: std::io::Error,
-    },
 
     #[error("Failed to create directory for goods path '{path}'")]
     GoodsCreateError {
@@ -173,13 +161,6 @@ impl Treasury {
             return Err(NewError::RootIsNotDir { path: root.into() });
         }
 
-        let root = root
-            .canonicalize()
-            .map_err(|source| NewError::RootDirCanonError {
-                source,
-                path: root.into(),
-            })?;
-
         let treasury_path = root.join(".treasury");
 
         if treasury_path.exists() {
@@ -204,7 +185,7 @@ impl Treasury {
 
         let goods = Treasury {
             registry: Arc::new(Mutex::new(Registry {
-                importers: Importers::new(&treasury_path),
+                importers: Importers::new(&root),
                 root: root.into(),
                 data: Data {
                     assets: Vec::new(),
@@ -234,13 +215,6 @@ impl Treasury {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, OpenError> {
         let root = root.as_ref();
 
-        let root = root
-            .canonicalize()
-            .map_err(|source| OpenError::RootDirCanonError {
-                source,
-                path: root.into(),
-            })?;
-
         let treasury_path = root.join(".treasury");
         let manifest_path = treasury_path.join("manifest.json");
 
@@ -261,7 +235,7 @@ impl Treasury {
         }
 
         let registry = Arc::new(Mutex::new(Registry {
-            importers: Importers::new(&treasury_path),
+            importers: Importers::new(&root),
             data,
             root: root.into(),
         }));
@@ -272,13 +246,15 @@ impl Treasury {
         let me = &mut *lock;
 
         for dir_path in &me.data.importers_dirs {
+            let root_dir_path = me.root.join(dir_path);
             if let Err(err) = me
                 .importers
-                .load_importers_dir(&me.root.join(dir_path), &registry_clone)
+                .load_importers_dir(&root_dir_path, &registry_clone)
             {
                 tracing::error!(
-                    "Failed to load importers from '{}'. {:#}",
+                    "Failed to load importers from '{} ({})'. {:#}",
                     dir_path.display(),
+                    root_dir_path.display(),
                     err
                 );
             }
@@ -337,20 +313,13 @@ impl Treasury {
         native_format: &str,
         tags: &[impl AsRef<str>],
     ) -> Result<Uuid, StoreError> {
-        let source_absolute;
-        let mut source = source.as_ref();
-
-        if source.is_relative() {
-            source_absolute = source
-                .canonicalize()
-                .map_err(|err| StoreError::SourceIoError {
-                    path: source.into(),
-                    source: err,
-                })?;
-            source = &source_absolute;
-        }
-
-        Registry::store(&self.registry, &source, source_format, native_format, tags)
+        Registry::store(
+            &self.registry,
+            source.as_ref(),
+            source_format,
+            native_format,
+            tags,
+        )
     }
 
     /// Fetches asset in native format.
@@ -452,7 +421,7 @@ pub(crate) struct FetchInfo {
 impl Registry {
     fn save(me: &Mutex<Self>) -> Result<(), SaveError> {
         let lock = me.lock().unwrap();
-        let treasury_path = lock.root.join(".treasury/manifest.json");
+        let treasury_path = lock.root.join(".treasury").join("manifest.json");
         let file =
             std::fs::File::create(&treasury_path).map_err(|source| SaveError::GoodsOpenError {
                 source,
@@ -471,16 +440,22 @@ impl Registry {
         native_format: &str,
         tags: &[impl AsRef<str>],
     ) -> Result<Uuid, StoreError> {
-        debug_assert!(source.is_absolute());
-
         let mut lock = me.lock().unwrap();
 
-        let source = relative_to(source, &lock.root)
+        // Find the source
+        let cd = std::env::current_dir().map_err(|_| StoreError::SourceIoError {
+            path: source.into(),
+            source: std::io::ErrorKind::NotFound.into(),
+        })?;
+
+        let source_absolute = cd.join(source);
+
+        let source_from_root = relative_to(&source_absolute, &lock.root)
             .into_owned()
             .into_boxed_path();
 
         if let Some(asset) = lock.data.assets.iter().find(|a| {
-            *a.source() == *source
+            *a.source() == *source_from_root
                 && a.source_format() == source_format
                 && a.native_format() == native_format
         }) {
@@ -510,21 +485,24 @@ impl Registry {
             Some(importer_entry) => {
                 tracing::trace!("Importer found. {}", importer_entry.name());
 
-                let source_absolute = lock.root.join(&*source);
-                let native_absolute = lock
-                    .root
-                    .join(".treasury")
-                    .join(uuid.to_hyphenated().to_string());
-                let native_tmp_path = native_absolute.with_extension("tmp");
+                let native = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
+                let native_tmp_path = native.with_extension("tmp");
 
-                let result = importer_entry.import(&source_absolute, &native_tmp_path, lock);
+                let native_absolute = lock.root.join(&native);
+                let native_tmp_path_absolute = native_absolute.with_extension("tmp");
+
+                let result = importer_entry.import(
+                    &source_absolute,
+                    &relative_to(&native_tmp_path, &lock.root),
+                    lock,
+                );
 
                 if let Err(err) = result {
                     return Err(StoreError::ImportError { source: err });
                 }
 
                 tracing::trace!("Imported successfully");
-                if let Err(source) = std::fs::rename(&native_tmp_path, &native_absolute) {
+                if let Err(err) = std::fs::rename(&native_tmp_path_absolute, &native_absolute) {
                     tracing::error!(
                         "Failed to rename '{}' to '{}'",
                         native_tmp_path.display(),
@@ -533,14 +511,14 @@ impl Registry {
 
                     return Err(StoreError::NativeIoError {
                         path: native_absolute.into(),
-                        source,
+                        source: err,
                     });
                 }
 
                 lock = me.lock().unwrap();
                 lock.data.assets.push(Asset::new(
                     uuid,
-                    source,
+                    source_from_root,
                     source_format.into(),
                     native_format.into(),
                     tags.iter().map(|tag| tag.as_ref().into()).collect(),
@@ -609,7 +587,7 @@ impl Registry {
 
                                 let result = importer.import(
                                     &asset.source_absolute().to_owned(),
-                                    &native_tmp_path,
+                                    &relative_to(&native_tmp_path, &lock.root),
                                     lock,
                                 );
 
@@ -620,6 +598,7 @@ impl Registry {
 
                                 match result {
                                     Ok(()) => {
+                                        drop(native_file);
                                         match std::fs::rename(&native_tmp_path, native_path) {
                                             Ok(()) => {
                                                 tracing::trace!("Native file updated");
@@ -641,6 +620,10 @@ impl Registry {
                                                     native_path.display(),
                                                     err,
                                                 );
+                                                return Err(FetchError::NativeIoError {
+                                                    source: err,
+                                                    path: native_path.to_path_buf().into(),
+                                                });
                                             }
                                         }
                                     }

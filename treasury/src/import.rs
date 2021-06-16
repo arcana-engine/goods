@@ -1,5 +1,6 @@
 use {
     crate::treasury::Registry,
+    eyre::WrapErr,
     std::{
         collections::hash_map::HashMap,
         path::{Path, PathBuf},
@@ -21,11 +22,6 @@ pub struct ImporterOpaque {
 const WASM_IMPORTERS_INITIAL_COUNT: u32 = 64;
 const ERROR_BUFFER_LEN: u32 = 2048;
 
-#[cfg(any(unix, target_os = "wasi"))]
-const OS_CHAR_SIZE: u32 = 1;
-#[cfg(windows)]
-const OS_CHAR_SIZE: u32 = 2;
-
 pub(crate) struct Importers {
     map: HashMap<Box<str>, HashMap<Box<str>, Arc<WasmImporter>>>,
     store: Store,
@@ -33,16 +29,19 @@ pub(crate) struct Importers {
 }
 
 impl Importers {
-    pub fn new(treasury_path: &Path) -> Self {
+    pub fn new(root: &Path) -> Self {
         let store = Store::default();
 
         let cd = std::env::current_dir().unwrap();
 
+        tracing::info!("WASI preopen dirs: {} and {}", cd.display(), root.display());
+
         let wasi = WasiState::new("treasury")
-            .preopen(|p| p.directory(&cd).read(true))
+            .preopen(|p| p.directory(&cd).alias(".").read(true))
             .unwrap()
             .preopen(|p| {
-                p.directory(treasury_path)
+                p.directory(root)
+                    .alias("/")
                     .read(true)
                     .write(true)
                     .create(true)
@@ -113,7 +112,7 @@ impl Importers {
 
         imports.register("env", wasmer::import_namespace! {{
             "treasury_registry_store" => Function::new_native_with_env(&self.store, env.clone(), treasury_registry_store),
-            "treasury_registry_fetch" => Function::new_native_with_env(&self.store, env, treasury_registry_fetch),
+            "treasury_registry_fetch" => Function::new_native_with_env(&self.store, env.clone(), treasury_registry_fetch),
         }});
 
         let instance = Instance::new(&module, &imports)?;
@@ -133,35 +132,21 @@ impl Importers {
         let name_source_native_trampoline = instance.exports.get_native_function::<(
             WasmPtr<fn()>,
             WasmPtr<ImporterOpaque>,
-            WasmPtr<u8, Array>,
+            WasmStrPtr,
             u32,
         ), u32>(
             "treasury_importer_name_source_native_trampoline",
         )?;
 
-        #[cfg(any(unix, target_os = "wasi"))]
         let importer_import_trampoline =
             instance.exports.get_native_function::<(
                 WasmPtr<fn()>,
                 WasmPtr<ImporterOpaque>,
-                WasmPtr<u8, Array>,
+                WasmStrPtr,
                 u32,
-                WasmPtr<u8, Array>,
+                WasmStrPtr,
                 u32,
-                WasmPtr<u8, Array>,
-                u32,
-            ), i32>("treasury_importer_import_trampoline")?;
-
-        #[cfg(windows)]
-        let importer_import_trampoline =
-            instance.exports.get_native_function::<(
-                WasmPtr<fn()>,
-                WasmPtr<ImporterOpaque>,
-                WasmPtr<u16, Array>,
-                u32,
-                WasmPtr<u16, Array>,
-                u32,
-                WasmPtr<u8, Array>,
+                WasmStrPtr,
                 u32,
             ), i32>("treasury_importer_import_trampoline")?;
 
@@ -251,21 +236,16 @@ pub struct WasmImporterFFI {
     import: WasmPtr<fn()>,
 }
 
-type NameSourceNativeFunctionArgs = (
-    WasmPtr<fn()>,
-    WasmPtr<ImporterOpaque>,
-    WasmPtr<u8, Array>,
-    u32,
-);
+type NameSourceNativeFunctionArgs = (WasmPtr<fn()>, WasmPtr<ImporterOpaque>, WasmStrPtr, u32);
 
 type ImportFunctionArgs = (
     WasmPtr<fn()>,
     WasmPtr<ImporterOpaque>,
-    WasmOsStrPtr,
+    WasmStrPtr,
     u32,
-    WasmOsStrPtr,
+    WasmStrPtr,
     u32,
-    WasmPtr<u8, Array>,
+    WasmStrPtr,
     u32,
 );
 
@@ -352,43 +332,47 @@ impl WasmImporter {
         #[cfg(windows)]
         use std::{ffi::OsStr, os::windows::ffi::OsStrExt};
 
-        let source_path = OsStr::new(source_path);
-        let native_path = OsStr::new(native_path);
+        #[cfg(any(unix, target_os = "wasi"))]
+        let source_path = OsStr::new(source_path).as_bytes();
 
         #[cfg(any(unix, target_os = "wasi"))]
+        let native_path = OsStr::new(native_path).as_bytes();
+
+        #[cfg(windows)]
+        let source_path_utf16 = OsStr::new(source_path).encode_wide().collect::<Vec<_>>();
+
+        #[cfg(windows)]
+        let source_path = String::from_utf16(&source_path_utf16)
+            .wrap_err_with(|| format!("Broken source path '{}'", source_path.display()))?;
+
+        #[cfg(windows)]
         let source_path = source_path.as_bytes();
 
-        #[cfg(any(unix, target_os = "wasi"))]
+        #[cfg(windows)]
+        let native_path_utf16 = OsStr::new(native_path).encode_wide().collect::<Vec<_>>();
+
+        #[cfg(windows)]
+        let native_path = String::from_utf16(&native_path_utf16)
+            .wrap_err_with(|| format!("Broken native path '{}'", native_path.display()))?;
+
+        #[cfg(windows)]
         let native_path = native_path.as_bytes();
 
-        #[cfg(windows)]
-        let source_path = source_path.encode_wide().collect::<Vec<_>>();
-        #[cfg(windows)]
-        let source_path = &source_path[..];
+        let size = source_path.len() as u32 + native_path.len() as u32 + ERROR_BUFFER_LEN;
 
-        #[cfg(windows)]
-        let native_path = native_path.encode_wide().collect::<Vec<_>>();
-        #[cfg(windows)]
-        let native_path = &native_path[..];
+        let ptr = self.state.alloc.call(size, 1).unwrap();
 
-        let size = OS_CHAR_SIZE * source_path.len() as u32
-            + OS_CHAR_SIZE * native_path.len() as u32
-            + ERROR_BUFFER_LEN;
-
-        let ptr = self.state.alloc.call(size, OS_CHAR_SIZE).unwrap();
-
-        let source_ptr = WasmOsStrPtr::new(ptr.offset());
-        let native_ptr = WasmOsStrPtr::new(ptr.offset() + OS_CHAR_SIZE * source_path.len() as u32);
+        let source_ptr = WasmStrPtr::new(ptr.offset());
+        let native_ptr = WasmStrPtr::new(ptr.offset() + source_path.len() as u32);
 
         let error_ptr = WasmPtr::<u8, Array>::new(
-            ptr.offset()
-                + OS_CHAR_SIZE * source_path.len() as u32
-                + OS_CHAR_SIZE * native_path.len() as u32,
+            ptr.offset() + source_path.len() as u32 + native_path.len() as u32,
         );
 
         let slice = source_ptr
             .deref(&self.state.memory, 0, source_path.len() as u32)
             .unwrap();
+
         slice
             .iter()
             .zip(source_path)
@@ -418,58 +402,38 @@ impl WasmImporter {
             let len = result.abs() as u32;
             let error = error_ptr.get_utf8_string(&self.state.memory, len).unwrap();
 
-            self.state.dealloc.call(ptr, size, OS_CHAR_SIZE)?;
+            self.state.dealloc.call(ptr, size, 1)?;
             Err(eyre::eyre!("Importer error: '{}'", error))
         } else {
-            self.state.dealloc.call(ptr, size, OS_CHAR_SIZE)?;
+            self.state.dealloc.call(ptr, size, 1)?;
             debug_assert_eq!(result, 0);
             Ok(())
         }
     }
 }
 
-#[cfg(any(unix, target_os = "wasi"))]
-type WasmOsStrPtr = WasmPtr<u8, Array>;
-
-#[cfg(windows)]
-type WasmOsStrPtr = WasmPtr<u16, Array>;
+type WasmStrPtr = WasmPtr<u8, Array>;
 
 #[allow(clippy::too_many_arguments)]
 fn treasury_registry_store(
     env: &ImporterEnv,
-    source_ptr: WasmOsStrPtr,
+    source_ptr: WasmStrPtr,
     source_len: u32,
-    source_format_ptr: WasmPtr<u8, Array>,
+    source_format_ptr: WasmStrPtr,
     source_format_len: u32,
-    native_format_ptr: WasmPtr<u8, Array>,
+    native_format_ptr: WasmStrPtr,
     native_format_len: u32,
-    tag_ptrs: WasmPtr<WasmPtr<u8, Array>, Array>,
+    tag_ptrs: WasmPtr<WasmStrPtr, Array>,
     tag_lens: WasmPtr<u32, Array>,
     tag_count: u32,
-    result_ptr: WasmPtr<u8, Array>,
+    result_ptr: WasmStrPtr,
     result_len: u32,
 ) -> i32 {
-    #[cfg(unix)]
-    use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
-    #[cfg(windows)]
-    use std::{ffi::OsString, os::windows::ffi::OsStringExt};
-    #[cfg(target_os = "wasi")]
-    use std::{ffi::Ostr, os::wasi::ffi::OsStrExt};
-
     let memory = env.memory_ref().unwrap();
 
     let source = source_ptr.deref(memory, 0, source_len).unwrap();
-
     let source = source.iter().map(std::cell::Cell::get).collect::<Vec<_>>();
-
-    #[cfg(any(unix, target_os = "wasi"))]
-    let source = OsStr::from_bytes(&source);
-
-    #[cfg(windows)]
-    let source = OsString::from_wide(&source);
-
-    #[cfg(windows)]
-    let source = &source;
+    let source = std::str::from_utf8(&source).unwrap();
 
     let source_format = source_format_ptr
         .deref(memory, 0, source_format_len)
@@ -557,7 +521,7 @@ fn treasury_registry_store(
 fn treasury_registry_fetch(
     env: &ImporterEnv,
     uuid: WasmPtr<u8, Array>,
-    path_ptr: WasmOsStrPtr,
+    path_ptr: WasmStrPtr,
     path_len: u32,
     error_ptr: WasmPtr<u8, Array>,
     error_len: u32,
@@ -588,7 +552,7 @@ fn treasury_registry_fetch(
 
             if path_len < native_path.len() as u32 {
                 tracing::error!(
-                    "Importer provided to short result buffer. At least {} chars long buffer is required.\nImporter should allocate buffer large enough to fit any sensible path length", native_path.len() as u32,
+                    "Importer provided to short result buffer. At least {} bytes long buffer is required.\nImporter should allocate buffer large enough to fit any sensible path length", native_path.len(),
                 );
 
                 let err = b"Path buffer is too small";
@@ -607,14 +571,20 @@ fn treasury_registry_fetch(
                 let path = path_ptr.deref(env.memory_ref().unwrap(), 0, len).unwrap();
 
                 #[cfg(any(unix, target_os = "wasi"))]
-                path.iter()
-                    .zip(native_path.as_bytes())
-                    .for_each(|(cell, c)| cell.set(*c));
+                let native_path_utf8 = native_path.as_bytes();
 
                 #[cfg(windows)]
+                let native_path_utf16 = native_path.encode_wide().collect::<Vec<_>>();
+
+                #[cfg(windows)]
+                let native_path = String::from_utf16(&native_path_utf16).unwrap();
+
+                #[cfg(windows)]
+                let native_path_utf8 = native_path.as_bytes();
+
                 path.iter()
-                    .zip(native_path.encode_wide())
-                    .for_each(|(cell, c)| cell.set(c));
+                    .zip(native_path_utf8)
+                    .for_each(|(cell, c)| cell.set(*c));
 
                 len as i32
             }
