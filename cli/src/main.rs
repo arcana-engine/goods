@@ -1,6 +1,4 @@
-use {clap::Clap, tracing_subscriber::layer::SubscriberExt as _, uuid::Uuid};
-
-pub use treasury::*;
+use {clap::Clap, goods_treasury::*, tracing_subscriber::layer::SubscriberExt as _, uuid::Uuid};
 
 #[derive(Clap)]
 #[clap(version = "0.1", author = "Zakarum <zakarumych@ya.ru>")]

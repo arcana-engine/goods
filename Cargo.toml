@@ -5,12 +5,15 @@ authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 documentation = "https://docs.rs/goods"
-homepage = "https://github.com/zaq/goods"
-repository = "https://github.com/zaq/goods"
+homepage = "https://github.com/zakarumych/goods"
+repository = "https://github.com/zakarumych/goods"
+description = "Asset pipeline complete with loader, database, importing plugins and procedural macros for asset definition from user-types"
+keywords = ["async", "asset", "macro", "derive"]
+categories = ["asynchronous", "game-development"]
 
 [dependencies]
 goods-proc = { version = "=0.1.0", path = "proc" }
-treasury = { version = "0.1.0", path = "treasury" }
+goods-treasury = { version = "0.1.0", path = "treasury" }
 uuid = "0.8"
 thiserror = "1.0"
 serde = "1.0"
@@ -26,4 +29,4 @@ num_cpus = "1.0"
 tokio = { version =  "1.0", features = ["rt", "sync", "parking_lot"] }
 
 [workspace]
-members = ["cli", "treasury", "import", "plugin"]
+members = ["cli", "treasury", "import"]

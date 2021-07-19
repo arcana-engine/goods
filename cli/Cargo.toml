@@ -1,18 +1,22 @@
 [package]
-name = "treasury-cli"
+name = "goods-treasury-cli"
 version = "0.1.0"
-authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
-documentation = "https://docs.rs/treasury-cli"
-homepage = "https://github.com/zaq/treasury-cli"
-repository = "https://github.com/zaq/treasury-cli"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/treasury"
+homepage = "https://github.com/zakarumych/treasury"
+repository = "https://github.com/zakarumych/treasury"
+description = "CLI tool for \"Treasury\""
+keywords = ["asset", "cli"]
+categories = ["command-line-interface", "game-development"]
 
 [[bin]]
 name = "treasury"
 path = "src/main.rs"
 
 [dependencies]
-treasury = { version = "0.1.0", path = "../treasury" }
+goods-treasury = { version = "0.1.0", path = "../treasury" }
 clap = "3.0.0-beta.2"
 tracing = "0.1"
 tracing-error = "0.1"

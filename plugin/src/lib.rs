@@ -1,8 +1,7 @@
 #![cfg(target_os = "wasi")]
 
 pub use {
-    std::path::Path,
-    treasury_import::{
+    goods_treasury_import::{
         eyre,
         ffi::{
             treasury_importer_alloc, treasury_importer_dealloc,
@@ -10,6 +9,7 @@ pub use {
         },
         generate_imports_and_exports, Importer, Registry,
     },
+    std::path::Path,
 };
 
 pub struct PluginImporter;

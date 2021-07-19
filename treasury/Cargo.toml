@@ -1,20 +1,23 @@
 [package]
-name = "treasury"
+name = "goods-treasury"
 version = "0.1.0"
 edition = "2018"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 license = "MIT OR Apache-2.0"
 documentation = "https://docs.rs/treasury"
-homepage = "https://github.com/zaq/treasury"
-repository = "https://github.com/zaq/treasury"
+homepage = "https://github.com/zakarumych/treasury"
+repository = "https://github.com/zakarumych/treasury"
+description = "Database for \"goods\" asset pipeline"
+keywords = ["asset", "wasm"]
+categories = ["game-development"]
 
 [dependencies]
-treasury-import = { version = "=0.1.0", path = "../import", default-features = false }
+goods-treasury-import = { version = "=0.1.0", path = "../import", default-features = false }
 tracing = { version = "0.1", features = ["attributes"] }
 uuid = { version = "0.8", features = ["v4", "serde"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 thiserror = "1.0"
 eyre = "0.6"
-wasmer = { version = "1.0", default-features = false, features = ["default-jit", "default-cranelift"] }
-wasmer-wasi = { version = "1.0", default-features = false }
+wasmer = { version = "2.0", default-features = false, features = ["default-universal", "default-cranelift"] }
+wasmer-wasi = { version = "2.0", default-features = false }

@@ -1,5 +1,5 @@
 [package]
-name = "plugin"
+name = "goods-treasury-plugin"
 version = "0.1.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
@@ -9,4 +9,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-treasury-import = { path = "../import" }
+goods-treasury-import = { path = "../import" }

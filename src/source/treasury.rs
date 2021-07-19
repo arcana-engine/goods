@@ -1,12 +1,12 @@
 use {
     crate::source::{AssetData, Source},
+    goods_treasury::Treasury,
     std::{future::Future, path::Path, pin::Pin, sync::Arc},
     tokio::sync::Mutex,
-    treasury::Treasury,
     uuid::Uuid,
 };
 
-pub use treasury::OpenError;
+pub use goods_treasury::OpenError;
 
 #[derive(Debug, thiserror::Error)]
 #[error("Failed to access native file '{path}'")]
@@ -45,8 +45,8 @@ impl Source for TreasurySource {
                     bytes: asset_data.bytes,
                     version: asset_data.version,
                 })),
-                Err(treasury::FetchError::NotFound) => Ok(None),
-                Err(treasury::FetchError::NativeIoError { source, path }) => {
+                Err(goods_treasury::FetchError::NotFound) => Ok(None),
+                Err(goods_treasury::FetchError::NativeIoError { source, path }) => {
                     Err(TreasuryFetchError { path, source })
                 }
             };
@@ -64,8 +64,8 @@ impl Source for TreasurySource {
                     bytes: asset_data.bytes,
                     version: asset_data.version,
                 })),
-                Err(treasury::FetchError::NotFound) => Ok(None),
-                Err(treasury::FetchError::NativeIoError { source, path }) => {
+                Err(goods_treasury::FetchError::NotFound) => Ok(None),
+                Err(goods_treasury::FetchError::NativeIoError { source, path }) => {
                     Err(TreasuryFetchError { path, source })
                 }
             };

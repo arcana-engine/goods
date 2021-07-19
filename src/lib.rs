@@ -1,4 +1,4 @@
-//! Asset loading facility.
+//! Asset loader.
 
 mod asset;
 mod field;

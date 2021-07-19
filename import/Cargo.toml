@@ -1,8 +1,15 @@
 [package]
-name = "treasury-import"
+name = "goods-treasury-import"
 version = "0.1.0"
-authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
+authors = ["Zakarum <zakarumych@ya.ru>"]
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/treasury-import"
+homepage = "https://github.com/zakarumych/treasury-import"
+repository = "https://github.com/zakarumych/treasury-import"
+description = "\"Treasury\" API for importers"
+keywords = ["asset", "wasm"]
+categories = ["game-development"]
 
 [features]
 ffi = []
