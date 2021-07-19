@@ -404,7 +404,7 @@ impl Treasury {
 
         if let Some(index) = lock.data.assets.iter().position(|a| a.uuid() == uuid) {
             let asset = &lock.data.assets[index];
-            if let Err(err) = std::fs::remove_dir(asset.native_absolute()) {
+            if let Err(err) = std::fs::remove_file(asset.native_absolute()) {
                 tracing::error!("Failed to remove native asset file '{}'", err);
             }
             lock.data.assets.remove(index);
