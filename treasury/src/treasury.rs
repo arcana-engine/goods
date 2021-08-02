@@ -400,8 +400,8 @@ impl Treasury {
         let mut lock = self.registry.lock().unwrap();
 
         if let Some(index) = lock.data.assets.iter().position(|a| a.uuid() == uuid) {
-            let asset = &lock.data.assets[index];
-            let native_absolute = lock.root.join(asset.uuid().to_hyphenated().to_string());
+            let native = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
+            let native_absolute = lock.root.join(native);
             if let Err(err) = std::fs::remove_file(&native_absolute) {
                 tracing::error!(
                     "Failed to remove native asset file '{}': {}",
@@ -506,11 +506,7 @@ impl Registry {
                     let native_tmp_path = native.with_extension("tmp");
                     let native_tmp_path_absolute = native_absolute.with_extension("tmp");
 
-                    let result = importer_entry.import(
-                        &source_absolute,
-                        &relative_to(&native_tmp_path_absolute, &lock.root),
-                        lock,
-                    );
+                    let result = importer_entry.import(&source_absolute, &native_tmp_path, lock);
 
                     if let Err(err) = result {
                         return Err(StoreError::ImportError { source: err });
@@ -520,7 +516,7 @@ impl Registry {
                     if let Err(err) = std::fs::rename(&native_tmp_path_absolute, &native_absolute) {
                         tracing::error!(
                             "Failed to rename '{}' to '{}'",
-                            native_tmp_path.display(),
+                            native_tmp_path_absolute.display(),
                             native_absolute.display(),
                         );
 
@@ -561,7 +557,7 @@ impl Registry {
             None => Err(FetchError::NotFound),
             Some(index) => {
                 let asset = &lock.data.assets[index];
-                let native_path = PathBuf::from(asset.uuid().to_hyphenated().to_string());
+                let native_path = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
                 let native_absolute_path = lock.root.join(&native_path);
                 let mut native_file =
                     std::fs::File::open(&native_absolute_path).map_err(|source| {
@@ -588,61 +584,77 @@ impl Registry {
                     if native_modified < source_modified {
                         tracing::trace!("Native asset file is out-of-date. Perform reimport");
 
-                        match lock
-                            .importers
-                            .get_importer(asset.source_format(), asset.native_format())
-                        {
-                            None => {
-                                tracing::warn!(
-                                    "Importer from '{}' to '{}' not found, asset '{}@{}' cannot be updated",
-                                    asset.source_format(),
-                                    asset.native_format(),
-                                    asset.uuid(),
-                                    asset.source().display(),
-                                );
-                            }
-                            Some(importer) => {
-                                let native_tmp_path = native_path.with_extension("tmp");
-                                let source_path = lock.root.join(asset.source());
+                        if asset.source_format() == asset.native_format() {
+                            let source_path = lock.root.join(asset.source());
+                            std::fs::copy(&source_path, &native_absolute_path).map_err(
+                                |source| FetchError::NativeIoError {
+                                    source,
+                                    path: native_absolute_path.clone().into(),
+                                },
+                            )?;
+                        } else {
+                            match lock
+                                .importers
+                                .get_importer(asset.source_format(), asset.native_format())
+                            {
+                                None => {
+                                    tracing::warn!(
+                                        "Importer from '{}' to '{}' not found, asset '{}@{}' cannot be updated",
+                                        asset.source_format(),
+                                        asset.native_format(),
+                                        asset.uuid(),
+                                        asset.source().display(),
+                                    );
+                                }
+                                Some(importer) => {
+                                    let native_tmp_path = native_path.with_extension("tmp");
+                                    let native_tmp_absolute_path =
+                                        native_absolute_path.with_extension("tmp");
+                                    let source_path = lock.root.join(asset.source());
 
-                                let result = importer.import(&source_path, &native_tmp_path, lock);
+                                    let result =
+                                        importer.import(&source_path, &native_tmp_path, lock);
 
-                                match result {
-                                    Ok(()) => {
-                                        drop(native_file);
-                                        match std::fs::rename(&native_tmp_path, &native_path) {
-                                            Ok(()) => {
-                                                tracing::trace!("Native file updated");
-                                            }
-                                            Err(err) => {
-                                                tracing::warn!(
+                                    match result {
+                                        Ok(()) => {
+                                            drop(native_file);
+                                            match std::fs::rename(
+                                                &native_tmp_absolute_path,
+                                                &native_absolute_path,
+                                            ) {
+                                                Ok(()) => {
+                                                    tracing::trace!("Native file updated");
+                                                }
+                                                Err(err) => {
+                                                    tracing::warn!(
                                                             "Failed to copy native file '{}' from '{}'. {:#}",
                                                             native_path.display(),
                                                             native_tmp_path.display(),
                                                             err
                                                         )
+                                                }
+                                            }
+                                            match std::fs::File::open(&native_path) {
+                                                Ok(file) => native_file = file,
+                                                Err(err) => {
+                                                    tracing::warn!(
+                                                        "Failed to reopen native file '{}'. {:#}",
+                                                        native_path.display(),
+                                                        err,
+                                                    );
+                                                    return Err(FetchError::NativeIoError {
+                                                        source: err,
+                                                        path: native_path.to_path_buf().into(),
+                                                    });
+                                                }
                                             }
                                         }
-                                        match std::fs::File::open(&native_path) {
-                                            Ok(file) => native_file = file,
-                                            Err(err) => {
-                                                tracing::warn!(
-                                                    "Failed to reopen native file '{}'. {:#}",
-                                                    native_path.display(),
-                                                    err,
-                                                );
-                                                return Err(FetchError::NativeIoError {
-                                                    source: err,
-                                                    path: native_path.to_path_buf().into(),
-                                                });
-                                            }
+                                        Err(err) => {
+                                            tracing::warn!(
+                                                "Native file reimport failed '{:#}'. Fallback to old file",
+                                                err,
+                                            );
                                         }
-                                    }
-                                    Err(err) => {
-                                        tracing::warn!(
-                                            "Native file reimport failed '{:#}'. Fallback to old file",
-                                            err,
-                                        );
                                     }
                                 }
                             }
