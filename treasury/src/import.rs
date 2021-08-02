@@ -346,6 +346,9 @@ impl WasmImporter {
             .wrap_err_with(|| format!("Broken source path '{}'", source_path.display()))?;
 
         #[cfg(windows)]
+        let source_path = source_path.replace("\\", "/");
+
+        #[cfg(windows)]
         let source_path = source_path.as_bytes();
 
         #[cfg(windows)]
@@ -354,6 +357,9 @@ impl WasmImporter {
         #[cfg(windows)]
         let native_path = String::from_utf16(&native_path_utf16)
             .wrap_err_with(|| format!("Broken native path '{}'", native_path.display()))?;
+
+        #[cfg(windows)]
+        let native_path = native_path.replace("\\", "/");
 
         #[cfg(windows)]
         let native_path = native_path.as_bytes();
@@ -434,6 +440,9 @@ fn treasury_registry_store(
     let source = source_ptr.deref(memory, 0, source_len).unwrap();
     let source = source.iter().map(std::cell::Cell::get).collect::<Vec<_>>();
     let source = std::str::from_utf8(&source).unwrap();
+
+    #[cfg(windows)]
+    let source = &source.replace("/", "\\");
 
     let source_format = source_format_ptr
         .deref(memory, 0, source_format_len)
@@ -578,6 +587,9 @@ fn treasury_registry_fetch(
 
                 #[cfg(windows)]
                 let native_path = String::from_utf16(&native_path_utf16).unwrap();
+
+                #[cfg(windows)]
+                let native_path = native_path.replace("\\", "/");
 
                 #[cfg(windows)]
                 let native_path_utf8 = native_path.as_bytes();

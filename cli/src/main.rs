@@ -89,6 +89,8 @@ pub fn main() -> eyre::Result<()> {
         tracing::error!("Failed to install eyre report handler: {}", err);
     }
 
+    let cd = std::env::current_dir().unwrap();
+
     let opts: Opts = Opts::parse();
 
     let level = match opts.verbose {
@@ -109,10 +111,10 @@ pub fn main() -> eyre::Result<()> {
 
     match opts.subcmd {
         SubCommand::Create(create) => {
-            let mut treasury = Treasury::new(&opts.root, false)?;
+            let mut treasury = Treasury::new(cd.join(&opts.root), false)?;
 
             for dir_path in create.importers {
-                treasury.load_importers_dir(dir_path.as_ref())?;
+                treasury.load_importers_dir(cd.join(&dir_path))?;
             }
 
             treasury.save()?;
@@ -120,10 +122,10 @@ pub fn main() -> eyre::Result<()> {
             println!("New goods created at '{}'", opts.root)
         }
         SubCommand::Update(create) => {
-            let mut treasury = Treasury::open(&opts.root)?;
+            let mut treasury = Treasury::open(cd.join(&opts.root))?;
 
             for dir_path in create.importers {
-                treasury.load_importers_dir(dir_path.as_ref())?;
+                treasury.load_importers_dir(cd.join(&dir_path))?;
             }
 
             treasury.save()?;
@@ -131,7 +133,7 @@ pub fn main() -> eyre::Result<()> {
             println!("New goods created at '{}'", opts.root)
         }
         SubCommand::Store(store) => {
-            let treasury = Treasury::open(&opts.root)?;
+            let treasury = Treasury::open(cd.join(&opts.root))?;
 
             let uuid = treasury.store(
                 store.source_path,
@@ -145,7 +147,7 @@ pub fn main() -> eyre::Result<()> {
             println!("New asset registered as '{}'", uuid);
         }
         SubCommand::Fetch(fetch) => {
-            let mut treasury = Treasury::open(&opts.root)?;
+            let mut treasury = Treasury::open(cd.join(&opts.root))?;
             let data = treasury.fetch(&fetch.uuid)?;
             println!("Asset loaded. Size: {}", data.bytes.len());
 
@@ -166,7 +168,7 @@ pub fn main() -> eyre::Result<()> {
             }
         }
         SubCommand::List(list) => {
-            let treasury = Treasury::open(&opts.root)?;
+            let treasury = Treasury::open(cd.join(&opts.root))?;
             let assets = treasury.list(&list.tags, list.native_format.as_deref());
             println!("{} assets found", assets.len());
             for asset in assets {
@@ -178,7 +180,7 @@ pub fn main() -> eyre::Result<()> {
             }
         }
         SubCommand::Remove(remove) => {
-            let treasury = Treasury::open(&opts.root)?;
+            let treasury = Treasury::open(cd.join(&opts.root))?;
             for uuid in &remove.uuids {
                 treasury.remove(*uuid);
             }

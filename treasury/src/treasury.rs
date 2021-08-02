@@ -224,15 +224,10 @@ impl Treasury {
                 path: manifest_path.clone().into(),
             })?;
 
-        let mut data: Data =
-            serde_json::from_reader(file).map_err(|source| OpenError::JsonError {
-                source,
-                path: manifest_path.clone().into(),
-            })?;
-
-        for asset in &mut data.assets {
-            asset.update_abs_paths(&root);
-        }
+        let data: Data = serde_json::from_reader(file).map_err(|source| OpenError::JsonError {
+            source,
+            path: manifest_path.clone().into(),
+        })?;
 
         let registry = Arc::new(Mutex::new(Registry {
             importers: Importers::new(&root),
@@ -268,7 +263,9 @@ impl Treasury {
         Registry::save(&self.registry)
     }
 
-    pub fn load_importers_dir(&mut self, dir_path: &Path) -> std::io::Result<()> {
+    pub fn load_importers_dir(&mut self, dir_path: impl AsRef<Path>) -> std::io::Result<()> {
+        let dir_path = dir_path.as_ref();
+
         if self
             .registry
             .lock()
@@ -404,8 +401,13 @@ impl Treasury {
 
         if let Some(index) = lock.data.assets.iter().position(|a| a.uuid() == uuid) {
             let asset = &lock.data.assets[index];
-            if let Err(err) = std::fs::remove_file(asset.native_absolute()) {
-                tracing::error!("Failed to remove native asset file '{}'", err);
+            let native_absolute = lock.root.join(asset.uuid().to_hyphenated().to_string());
+            if let Err(err) = std::fs::remove_file(&native_absolute) {
+                tracing::error!(
+                    "Failed to remove native asset file '{}': {}",
+                    native_absolute.display(),
+                    err
+                );
             }
             lock.data.assets.remove(index);
         }
@@ -443,16 +445,19 @@ impl Registry {
         let mut lock = me.lock().unwrap();
 
         // Find the source
-        let cd = std::env::current_dir().map_err(|_| StoreError::SourceIoError {
-            path: source.into(),
-            source: std::io::ErrorKind::NotFound.into(),
-        })?;
 
-        let source_absolute = cd.join(source);
-
-        let source_from_root = relative_to(&source_absolute, &lock.root)
-            .into_owned()
-            .into_boxed_path();
+        let source_absolute;
+        let source_from_root = if source.is_absolute() {
+            source_absolute = source.to_path_buf();
+            relative_to(source, &lock.root)
+        } else {
+            let cd = std::env::current_dir().map_err(|_| StoreError::SourceIoError {
+                path: source.into(),
+                source: std::io::ErrorKind::NotFound.into(),
+            })?;
+            source_absolute = cd.join(source);
+            relative_to(&source_absolute, &lock.root)
+        };
 
         if let Some(asset) = lock.data.assets.iter().find(|a| {
             *a.source() == *source_from_root
@@ -481,10 +486,10 @@ impl Registry {
         let native_absolute = lock.root.join(&native);
 
         if source_format == native_format {
-            if let Err(err) = std::fs::copy(&source_absolute, &native_absolute) {
+            if let Err(err) = std::fs::copy(&source, &native_absolute) {
                 return Err(StoreError::SourceIoError {
                     source: err,
-                    path: source_absolute.into(),
+                    path: source.into(),
                 });
             }
         } else {
@@ -503,7 +508,7 @@ impl Registry {
 
                     let result = importer_entry.import(
                         &source_absolute,
-                        &relative_to(&native_tmp_path, &lock.root),
+                        &relative_to(&native_tmp_path_absolute, &lock.root),
                         lock,
                     );
 
@@ -532,12 +537,10 @@ impl Registry {
 
         lock.data.assets.push(Asset::new(
             uuid,
-            source_from_root,
+            source_from_root.into_owned().into(),
             source_format.into(),
             native_format.into(),
             tags.iter().map(|tag| tag.as_ref().into()).collect(),
-            native_absolute.into(),
-            source_absolute.into(),
         ));
 
         tracing::info!("Asset '{}' registered", uuid);
@@ -552,19 +555,21 @@ impl Registry {
         uuid: &Uuid,
         next_version: u64,
     ) -> Result<Option<FetchInfo>, FetchError> {
-        let mut lock = me.lock().unwrap();
+        let lock = me.lock().unwrap();
 
         match lock.data.assets.iter().position(|a| a.uuid() == *uuid) {
             None => Err(FetchError::NotFound),
             Some(index) => {
-                let mut asset = &lock.data.assets[index];
-                let mut native_path = asset.native_absolute();
-                let mut native_file = std::fs::File::open(native_path).map_err(|source| {
-                    FetchError::NativeIoError {
-                        source,
-                        path: native_path.to_path_buf().into(),
-                    }
-                })?;
+                let asset = &lock.data.assets[index];
+                let native_path = PathBuf::from(asset.uuid().to_hyphenated().to_string());
+                let native_absolute_path = lock.root.join(&native_path);
+                let mut native_file =
+                    std::fs::File::open(&native_absolute_path).map_err(|source| {
+                        FetchError::NativeIoError {
+                            source,
+                            path: native_absolute_path.clone().into(),
+                        }
+                    })?;
 
                 let native_modified =
                     native_file
@@ -572,11 +577,13 @@ impl Registry {
                         .and_then(|m| m.modified())
                         .map_err(|source| FetchError::NativeIoError {
                             source,
-                            path: native_path.to_path_buf().into(),
+                            path: native_absolute_path.clone().into(),
                         })?;
 
+                let source_absolute = lock.root.join(asset.source());
+
                 if let Ok(source_modified) =
-                    std::fs::metadata(asset.source_absolute()).and_then(|m| m.modified())
+                    std::fs::metadata(source_absolute).and_then(|m| m.modified())
                 {
                     if native_modified < source_modified {
                         tracing::trace!("Native asset file is out-of-date. Perform reimport");
@@ -596,22 +603,14 @@ impl Registry {
                             }
                             Some(importer) => {
                                 let native_tmp_path = native_path.with_extension("tmp");
+                                let source_path = lock.root.join(asset.source());
 
-                                let result = importer.import(
-                                    &asset.source_absolute().to_owned(),
-                                    &relative_to(&native_tmp_path, &lock.root),
-                                    lock,
-                                );
-
-                                lock = me.lock().unwrap();
-                                asset = &lock.data.assets[index];
-
-                                native_path = asset.native_absolute();
+                                let result = importer.import(&source_path, &native_tmp_path, lock);
 
                                 match result {
                                     Ok(()) => {
                                         drop(native_file);
-                                        match std::fs::rename(&native_tmp_path, native_path) {
+                                        match std::fs::rename(&native_tmp_path, &native_path) {
                                             Ok(()) => {
                                                 tracing::trace!("Native file updated");
                                             }
@@ -624,7 +623,7 @@ impl Registry {
                                                         )
                                             }
                                         }
-                                        match std::fs::File::open(native_path) {
+                                        match std::fs::File::open(&native_path) {
                                             Ok(file) => native_file = file,
                                             Err(err) => {
                                                 tracing::warn!(
@@ -661,7 +660,7 @@ impl Registry {
                     return Ok(None);
                 }
 
-                let native_path = lock.data.assets[index].native_absolute().into();
+                let native_path = native_absolute_path.into();
 
                 Ok(Some(FetchInfo {
                     native_path,
@@ -674,8 +673,16 @@ impl Registry {
 }
 
 fn relative_to<'a>(path: &'a Path, root: &Path) -> std::borrow::Cow<'a, Path> {
-    debug_assert!(path.is_absolute());
-    debug_assert!(root.is_absolute());
+    debug_assert!(
+        path.is_absolute(),
+        "Path '{}' is not absolute",
+        path.display()
+    );
+    debug_assert!(
+        root.is_absolute(),
+        "Root path '{}' is not absolute",
+        root.display()
+    );
 
     let mut pcs = path.components();
     let mut rcs = root.components();
