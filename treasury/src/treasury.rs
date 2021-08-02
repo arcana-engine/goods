@@ -477,62 +477,74 @@ impl Registry {
             }
         };
 
-        match lock.importers.get_importer(source_format, native_format) {
-            None => Err(StoreError::ImporterNotFound {
-                source_format: source_format.to_owned(),
-                native_format: native_format.to_owned(),
-            }),
-            Some(importer_entry) => {
-                tracing::trace!("Importer found. {}", importer_entry.name());
+        let native = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
+        let native_absolute = lock.root.join(&native);
 
-                let native = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
-                let native_tmp_path = native.with_extension("tmp");
-
-                let native_absolute = lock.root.join(&native);
-                let native_tmp_path_absolute = native_absolute.with_extension("tmp");
-
-                let result = importer_entry.import(
-                    &source_absolute,
-                    &relative_to(&native_tmp_path, &lock.root),
-                    lock,
-                );
-
-                if let Err(err) = result {
-                    return Err(StoreError::ImportError { source: err });
+        if source_format == native_format {
+            if let Err(err) = std::fs::copy(&source_absolute, &native_absolute) {
+                return Err(StoreError::SourceIoError {
+                    source: err,
+                    path: source_absolute.into(),
+                });
+            }
+        } else {
+            match lock.importers.get_importer(source_format, native_format) {
+                None => {
+                    return Err(StoreError::ImporterNotFound {
+                        source_format: source_format.to_owned(),
+                        native_format: native_format.to_owned(),
+                    })
                 }
+                Some(importer_entry) => {
+                    tracing::trace!("Importer found. {}", importer_entry.name());
 
-                tracing::trace!("Imported successfully");
-                if let Err(err) = std::fs::rename(&native_tmp_path_absolute, &native_absolute) {
-                    tracing::error!(
-                        "Failed to rename '{}' to '{}'",
-                        native_tmp_path.display(),
-                        native_absolute.display(),
+                    let native_tmp_path = native.with_extension("tmp");
+                    let native_tmp_path_absolute = native_absolute.with_extension("tmp");
+
+                    let result = importer_entry.import(
+                        &source_absolute,
+                        &relative_to(&native_tmp_path, &lock.root),
+                        lock,
                     );
 
-                    return Err(StoreError::NativeIoError {
-                        path: native_absolute.into(),
-                        source: err,
-                    });
+                    if let Err(err) = result {
+                        return Err(StoreError::ImportError { source: err });
+                    }
+
+                    tracing::trace!("Imported successfully");
+                    if let Err(err) = std::fs::rename(&native_tmp_path_absolute, &native_absolute) {
+                        tracing::error!(
+                            "Failed to rename '{}' to '{}'",
+                            native_tmp_path.display(),
+                            native_absolute.display(),
+                        );
+
+                        return Err(StoreError::NativeIoError {
+                            path: native_absolute.into(),
+                            source: err,
+                        });
+                    }
+
+                    lock = me.lock().unwrap();
                 }
-
-                lock = me.lock().unwrap();
-                lock.data.assets.push(Asset::new(
-                    uuid,
-                    source_from_root,
-                    source_format.into(),
-                    native_format.into(),
-                    tags.iter().map(|tag| tag.as_ref().into()).collect(),
-                    native_absolute.into(),
-                    source_absolute.into(),
-                ));
-
-                tracing::info!("Asset '{}' registered", uuid);
-                drop(lock);
-                let _ = Self::save(me);
-
-                Ok(uuid)
             }
         }
+
+        lock.data.assets.push(Asset::new(
+            uuid,
+            source_from_root,
+            source_format.into(),
+            native_format.into(),
+            tags.iter().map(|tag| tag.as_ref().into()).collect(),
+            native_absolute.into(),
+            source_absolute.into(),
+        ));
+
+        tracing::info!("Asset '{}' registered", uuid);
+        drop(lock);
+        let _ = Self::save(me);
+
+        Ok(uuid)
     }
 
     pub(crate) fn fetch(
