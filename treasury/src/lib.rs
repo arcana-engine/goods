@@ -20,4 +20,7 @@ mod import;
 
 mod treasury;
 
-pub use {self::treasury::*, goods_treasury_import::*};
+#[cfg(feature = "import")]
+pub use goods_treasury_import::*;
+
+pub use self::treasury::*;
