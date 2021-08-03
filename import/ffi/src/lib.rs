@@ -268,7 +268,7 @@ macro_rules! generate_imports_and_exports {
     ($($importer:expr),* $(,)?) => {
 
         #[no_mangle]
-        pub unsafe fn treasury_importer_enumerate_importers(importers: *mut $crate::ffi::ImporterFFI, count: usize) -> usize {
+        pub unsafe fn treasury_importer_enumerate_importers(importers: *mut $crate::ImporterFFI, count: usize) -> usize {
             const COUNT: usize = $crate::count_tt!($(($importer)),*);
 
             if count < COUNT {
@@ -277,7 +277,7 @@ macro_rules! generate_imports_and_exports {
                 let mut ptr = importers;
 
                 $(
-                    ::std::ptr::write(ptr, $crate::ffi::ImporterFFI::new($importer));
+                    ::std::ptr::write(ptr, $crate::ImporterFFI::new($importer));
                     ptr = ptr.add(1);
                 )*
 
