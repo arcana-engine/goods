@@ -1,8 +1,5 @@
 use {std::path::Path, uuid::Uuid};
 
-#[cfg(feature = "ffi")]
-pub mod ffi;
-
 pub use eyre;
 
 /// Object to register sub-assets when importing super-asset.

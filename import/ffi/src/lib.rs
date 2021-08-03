@@ -1,5 +1,5 @@
 use {
-    super::{Importer, Registry},
+    goods_treasury_import::{Importer, Registry},
     std::path::Path,
     uuid::Uuid,
 };

@@ -1,6 +1,6 @@
 [package]
 name = "goods-treasury"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2018"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 license = "MIT OR Apache-2.0"
@@ -15,7 +15,7 @@ categories = ["game-development"]
 import = ["goods-treasury-import"]
 
 [dependencies]
-goods-treasury-import = { version = "=0.1.0", path = "../import", default-features = false, optional = true }
+goods-treasury-import = { version = "=0.2.0", path = "../import", default-features = false, optional = true }
 tracing = { version = "0.1", features = ["attributes"] }
 uuid = { version = "0.8", features = ["v4", "serde"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
