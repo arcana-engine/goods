@@ -14,7 +14,10 @@
 //!
 
 mod asset;
+
+#[cfg(feature = "import")]
 mod import;
+
 mod treasury;
 
 pub use {self::treasury::*, goods_treasury_import::*};

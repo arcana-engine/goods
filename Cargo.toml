@@ -1,6 +1,6 @@
 [package]
 name = "goods"
-version = "0.9.0"
+version = "0.10.0"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
@@ -11,9 +11,12 @@ description = "Asset pipeline complete with loader, database, importing plugins 
 keywords = ["async", "asset", "macro", "derive"]
 categories = ["asynchronous", "game-development"]
 
+[features]
+fetch-reimport = ["goods-treasury/import"]
+
 [dependencies]
 goods-proc = { version = "=0.1.0", path = "proc" }
-goods-treasury = { version = "0.1.0", path = "treasury" }
+goods-treasury = { version = "0.2.0", path = "treasury" }
 uuid = "0.8"
 thiserror = "1.0"
 serde = "1.0"

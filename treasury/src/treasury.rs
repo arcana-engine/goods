@@ -1,13 +1,12 @@
 use {
-    crate::{asset::Asset, import::Importers},
-    std::{
-        io::Read,
-        path::{Path, PathBuf},
-        sync::{Arc, Mutex},
-        time::SystemTime,
-    },
+    crate::asset::Asset,
+    parking_lot::Mutex,
+    std::{io::Read, path::Path, sync::Arc, time::SystemTime},
     uuid::Uuid,
 };
+
+#[cfg(feature = "import")]
+use crate::import::Importers;
 
 /// Storage for goods.
 pub struct Treasury {
@@ -29,6 +28,7 @@ pub(crate) struct Registry {
     data: Data,
 
     /// Importers
+    #[cfg(feature = "import")]
     importers: Importers,
 }
 
@@ -185,6 +185,7 @@ impl Treasury {
 
         let goods = Treasury {
             registry: Arc::new(Mutex::new(Registry {
+                #[cfg(feature = "import")]
                 importers: Importers::new(&root),
                 root: root.into(),
                 data: Data {
@@ -193,19 +194,6 @@ impl Treasury {
                 },
             })),
         };
-
-        // let file =
-        //     std::fs::File::create(&treasury_path.join("manifest.json")).map_err(|source| {
-        //         SaveError::GoodsOpenError {
-        //             source,
-        //             path: treasury_path.clone().into(),
-        //         }
-        //     })?;
-
-        // serde_json::to_writer(file, &goods.inner.data).map_err(|source| SaveError::JsonError {
-        //     source,
-        //     path: treasury_path.clone().into(),
-        // })?;
 
         Ok(goods)
     }
@@ -230,31 +218,35 @@ impl Treasury {
         })?;
 
         let registry = Arc::new(Mutex::new(Registry {
+            #[cfg(feature = "import")]
             importers: Importers::new(&root),
             data,
             root: root.into(),
         }));
 
-        let registry_clone = registry.clone();
+        #[cfg(feature = "import")]
+        {
+            let registry_clone = registry.clone();
 
-        let mut lock = registry.lock().unwrap();
-        let me = &mut *lock;
+            let mut lock = registry.lock();
+            let me = &mut *lock;
 
-        for dir_path in &me.data.importers_dirs {
-            let root_dir_path = me.root.join(dir_path);
-            if let Err(err) = me
-                .importers
-                .load_importers_dir(&root_dir_path, &registry_clone)
-            {
-                tracing::error!(
-                    "Failed to load importers from '{} ({})'. {:#}",
-                    dir_path.display(),
-                    root_dir_path.display(),
-                    err
-                );
+            for dir_path in &me.data.importers_dirs {
+                let root_dir_path = me.root.join(dir_path);
+                if let Err(err) = me
+                    .importers
+                    .load_importers_dir(&root_dir_path, &registry_clone)
+                {
+                    tracing::error!(
+                        "Failed to load importers from '{} ({})'. {:#}",
+                        dir_path.display(),
+                        root_dir_path.display(),
+                        err
+                    );
+                }
             }
+            drop(lock);
         }
-        drop(lock);
 
         Ok(Treasury { registry })
     }
@@ -263,13 +255,13 @@ impl Treasury {
         Registry::save(&self.registry)
     }
 
+    #[cfg(feature = "import")]
     pub fn load_importers_dir(&mut self, dir_path: impl AsRef<Path>) -> std::io::Result<()> {
         let dir_path = dir_path.as_ref();
 
         if self
             .registry
             .lock()
-            .unwrap()
             .data
             .importers_dirs
             .iter()
@@ -279,7 +271,7 @@ impl Treasury {
         } else {
             let registry_clone = self.registry.clone();
 
-            let mut lock = self.registry.lock().unwrap();
+            let mut lock = self.registry.lock();
 
             match lock.importers.load_importers_dir(dir_path, &registry_clone) {
                 Ok(()) => {
@@ -303,6 +295,7 @@ impl Treasury {
     }
 
     /// Import asset into goods instance
+    #[cfg(feature = "import")]
     pub fn store(
         &self,
         source: impl AsRef<Path>,
@@ -373,7 +366,7 @@ impl Treasury {
     /// Returns assets information.
     #[tracing::instrument(skip(self, tags))]
     pub fn list(&self, tags: &[impl AsRef<str>], native_format: Option<&str>) -> Vec<Asset> {
-        let lock = self.registry.lock().unwrap();
+        let lock = self.registry.lock();
 
         lock.data
             .assets
@@ -397,7 +390,7 @@ impl Treasury {
     /// Returns assets information.
     #[tracing::instrument(skip(self))]
     pub fn remove<'a>(&self, uuid: Uuid) {
-        let mut lock = self.registry.lock().unwrap();
+        let mut lock = self.registry.lock();
 
         if let Some(index) = lock.data.assets.iter().position(|a| a.uuid() == uuid) {
             let native = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
@@ -422,7 +415,7 @@ pub(crate) struct FetchInfo {
 
 impl Registry {
     fn save(me: &Mutex<Self>) -> Result<(), SaveError> {
-        let lock = me.lock().unwrap();
+        let lock = me.lock();
         let treasury_path = lock.root.join(".treasury").join("manifest.json");
         let file =
             std::fs::File::create(&treasury_path).map_err(|source| SaveError::GoodsOpenError {
@@ -435,6 +428,7 @@ impl Registry {
         })
     }
 
+    #[cfg(feature = "import")]
     pub(crate) fn store(
         me: &Mutex<Self>,
         source: &Path,
@@ -442,7 +436,7 @@ impl Registry {
         native_format: &str,
         tags: &[impl AsRef<str>],
     ) -> Result<Uuid, StoreError> {
-        let mut lock = me.lock().unwrap();
+        let mut lock = me.lock();
 
         // Find the source
 
@@ -526,7 +520,7 @@ impl Registry {
                         });
                     }
 
-                    lock = me.lock().unwrap();
+                    lock = me.lock();
                 }
             }
         }
@@ -551,12 +545,46 @@ impl Registry {
         uuid: &Uuid,
         next_version: u64,
     ) -> Result<Option<FetchInfo>, FetchError> {
-        let lock = me.lock().unwrap();
+        let lock = me.lock();
 
         match lock.data.assets.iter().position(|a| a.uuid() == *uuid) {
             None => Err(FetchError::NotFound),
+            #[cfg(not(feature = "import"))]
+            Some(_) => {
+                let native_path = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
+                let native_absolute_path = lock.root.join(&native_path);
+                let native_file = std::fs::File::open(&native_absolute_path).map_err(|source| {
+                    FetchError::NativeIoError {
+                        source,
+                        path: native_absolute_path.clone().into(),
+                    }
+                })?;
+
+                let native_modified =
+                    native_file
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .map_err(|source| FetchError::NativeIoError {
+                            source,
+                            path: native_absolute_path.clone().into(),
+                        })?;
+
+                let version = version_from_systime(native_modified);
+                if next_version > version {
+                    tracing::trace!("Native asset is not updated");
+                    return Ok(None);
+                }
+
+                let native_path = native_absolute_path.into();
+
+                Ok(Some(FetchInfo {
+                    native_path,
+                    native_file,
+                    version,
+                }))
+            }
+            #[cfg(feature = "import")]
             Some(index) => {
-                let asset = &lock.data.assets[index];
                 let native_path = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
                 let native_absolute_path = lock.root.join(&native_path);
                 let mut native_file =
@@ -576,6 +604,7 @@ impl Registry {
                             path: native_absolute_path.clone().into(),
                         })?;
 
+                let asset = &lock.data.assets[index];
                 let source_absolute = lock.root.join(asset.source());
 
                 if let Ok(source_modified) =
@@ -684,7 +713,10 @@ impl Registry {
     }
 }
 
+#[cfg(feature = "import")]
 fn relative_to<'a>(path: &'a Path, root: &Path) -> std::borrow::Cow<'a, Path> {
+    use std::path::PathBuf;
+
     debug_assert!(
         path.is_absolute(),
         "Path '{}' is not absolute",
@@ -729,31 +761,3 @@ fn version_from_systime(systime: SystemTime) -> u64 {
         .unwrap()
         .as_millis() as u64
 }
-
-// fn replace_source_tmp(source_path: &Path, source_tmp_path: &Path) -> std::io::Result<()> {
-//     if source_tmp_path.exists() {
-//         std::fs::remove_file(source_tmp_path)?;
-//     }
-
-//     match std::fs::hard_link(source_path, source_tmp_path) {
-//         Ok(()) => Ok(()),
-//         Err(err) => {
-//             tracing::debug!("Hard-link to source path '{}' cannot be created at '{}'. {:#}. Fallback to copy instead", source_path.display(), source_tmp_path.display(), err);
-//             std::fs::copy(source_path, source_tmp_path)?;
-//             Ok(())
-//         }
-//     }
-// }
-
-// fn delete_source_tmp(source_path: &Path, source_tmp_path: &Path) {
-//     if source_tmp_path.exists() {
-//         if let Err(err) = std::fs::remove_file(source_tmp_path) {
-//             tracing::warn!(
-//                 "Failed to cleanup source's '{}' copy at '{}'. {:#}",
-//                 source_path.display(),
-//                 source_tmp_path.display(),
-//                 err
-//             );
-//         }
-//     }
-// }

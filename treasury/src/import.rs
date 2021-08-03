@@ -1,10 +1,11 @@
 use {
     crate::treasury::Registry,
     eyre::WrapErr,
+    parking_lot::{Mutex, MutexGuard},
     std::{
         collections::hash_map::HashMap,
         path::{Path, PathBuf},
-        sync::{Arc, Mutex, MutexGuard, Weak},
+        sync::{Arc, Weak},
     },
     uuid::Uuid,
     wasmer::{

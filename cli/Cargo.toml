@@ -1,6 +1,6 @@
 [package]
 name = "goods-treasury-cli"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2018"
 authors = ["Zakarum <zakarumych@ya.ru>"]
 license = "MIT OR Apache-2.0"
@@ -16,7 +16,7 @@ name = "treasury"
 path = "src/main.rs"
 
 [dependencies]
-goods-treasury = { version = "0.1.3", path = "../treasury" }
+goods-treasury = { version = "0.2.0", path = "../treasury", features = ["import"] }
 clap = "3.0.0-beta.2"
 tracing = "0.1"
 tracing-error = "0.1"
