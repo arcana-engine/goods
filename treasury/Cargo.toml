@@ -12,7 +12,7 @@ keywords = ["asset", "wasm"]
 categories = ["game-development"]
 
 [features]
-import = ["goods-treasury-import"]
+import = ["goods-treasury-import", "wasmer", "wasmer-wasi"]
 
 [dependencies]
 goods-treasury-import = { version = "=0.2.0", path = "../import", default-features = false, optional = true }
@@ -22,6 +22,6 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 thiserror = "1.0"
 eyre = "0.6"
-wasmer = { version = "2.0", default-features = false, features = ["default-universal", "default-cranelift"] }
-wasmer-wasi = { version = "2.0", default-features = false }
+wasmer = { version = "2.0", default-features = false, features = ["default-universal", "default-cranelift"], optional = true }
+wasmer-wasi = { version = "2.0", default-features = false, optional = true }
 parking_lot = "0.11"
