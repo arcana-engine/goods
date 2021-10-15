@@ -459,7 +459,17 @@ impl Registry {
                 && a.native_format() == native_format
         }) {
             tracing::trace!("Already imported");
-            return Ok(asset.uuid());
+
+            let uuid = asset.uuid();
+            drop(lock);
+
+            if let Err(err) = Self::fetch(me, &uuid, 0) {
+                tracing::error!(
+                    "Failed to reimport while storing already known asset. {:#}",
+                    err
+                );
+            }
+            return Ok(uuid);
         }
 
         tracing::debug!(
@@ -476,11 +486,11 @@ impl Registry {
             }
         };
 
-        let native = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
-        let native_absolute = lock.root.join(&native);
+        let native_path = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
+        let native_path_absolute = lock.root.join(&native_path);
 
         if source_format == native_format {
-            if let Err(err) = std::fs::copy(&source, &native_absolute) {
+            if let Err(err) = std::fs::copy(&source, &native_path_absolute) {
                 return Err(StoreError::SourceIoError {
                     source: err,
                     path: source.into(),
@@ -497,8 +507,7 @@ impl Registry {
                 Some(importer_entry) => {
                     tracing::trace!("Importer found. {}", importer_entry.name());
 
-                    let native_tmp_path = native.with_extension("tmp");
-                    let native_tmp_path_absolute = native_absolute.with_extension("tmp");
+                    let native_tmp_path = native_path.with_extension("tmp");
 
                     let result = importer_entry.import(&source_absolute, &native_tmp_path, lock);
 
@@ -507,15 +516,19 @@ impl Registry {
                     }
 
                     tracing::trace!("Imported successfully");
-                    if let Err(err) = std::fs::rename(&native_tmp_path_absolute, &native_absolute) {
+
+                    let native_tmp_path_absolute = native_path_absolute.with_extension("tmp");
+                    if let Err(err) =
+                        std::fs::rename(&native_tmp_path_absolute, &native_path_absolute)
+                    {
                         tracing::error!(
                             "Failed to rename '{}' to '{}'",
                             native_tmp_path_absolute.display(),
-                            native_absolute.display(),
+                            native_path_absolute.display(),
                         );
 
                         return Err(StoreError::NativeIoError {
-                            path: native_absolute.into(),
+                            path: native_path_absolute.into(),
                             source: err,
                         });
                     }
@@ -552,11 +565,11 @@ impl Registry {
             #[cfg(not(feature = "import"))]
             Some(_) => {
                 let native_path = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
-                let native_absolute_path = lock.root.join(&native_path);
-                let native_file = std::fs::File::open(&native_absolute_path).map_err(|source| {
+                let native_path_absolute = lock.root.join(&native_path);
+                let native_file = std::fs::File::open(&native_path_absolute).map_err(|source| {
                     FetchError::NativeIoError {
                         source,
-                        path: native_absolute_path.clone().into(),
+                        path: native_path_absolute.clone().into(),
                     }
                 })?;
 
@@ -566,7 +579,7 @@ impl Registry {
                         .and_then(|m| m.modified())
                         .map_err(|source| FetchError::NativeIoError {
                             source,
-                            path: native_absolute_path.clone().into(),
+                            path: native_path_absolute.clone().into(),
                         })?;
 
                 let version = version_from_systime(native_modified);
@@ -575,7 +588,7 @@ impl Registry {
                     return Ok(None);
                 }
 
-                let native_path = native_absolute_path.into();
+                let native_path = native_path_absolute.into();
 
                 Ok(Some(FetchInfo {
                     native_path,
@@ -586,12 +599,12 @@ impl Registry {
             #[cfg(feature = "import")]
             Some(index) => {
                 let native_path = Path::new(".treasury").join(uuid.to_hyphenated().to_string());
-                let native_absolute_path = lock.root.join(&native_path);
+                let native_path_absolute = lock.root.join(&native_path);
                 let mut native_file =
-                    std::fs::File::open(&native_absolute_path).map_err(|source| {
+                    std::fs::File::open(&native_path_absolute).map_err(|source| {
                         FetchError::NativeIoError {
                             source,
-                            path: native_absolute_path.clone().into(),
+                            path: native_path_absolute.clone().into(),
                         }
                     })?;
 
@@ -601,7 +614,7 @@ impl Registry {
                         .and_then(|m| m.modified())
                         .map_err(|source| FetchError::NativeIoError {
                             source,
-                            path: native_absolute_path.clone().into(),
+                            path: native_path_absolute.clone().into(),
                         })?;
 
                 let asset = &lock.data.assets[index];
@@ -615,10 +628,10 @@ impl Registry {
 
                         if asset.source_format() == asset.native_format() {
                             let source_path = lock.root.join(asset.source());
-                            std::fs::copy(&source_path, &native_absolute_path).map_err(
+                            std::fs::copy(&source_path, &native_path_absolute).map_err(
                                 |source| FetchError::NativeIoError {
                                     source,
-                                    path: native_absolute_path.clone().into(),
+                                    path: native_path_absolute.clone().into(),
                                 },
                             )?;
                         } else {
@@ -638,7 +651,7 @@ impl Registry {
                                 Some(importer) => {
                                     let native_tmp_path = native_path.with_extension("tmp");
                                     let native_tmp_absolute_path =
-                                        native_absolute_path.with_extension("tmp");
+                                        native_path_absolute.with_extension("tmp");
                                     let source_path = lock.root.join(asset.source());
 
                                     let result =
@@ -649,7 +662,7 @@ impl Registry {
                                             drop(native_file);
                                             match std::fs::rename(
                                                 &native_tmp_absolute_path,
-                                                &native_absolute_path,
+                                                &native_path_absolute,
                                             ) {
                                                 Ok(()) => {
                                                     tracing::trace!("Native file updated");
@@ -663,17 +676,19 @@ impl Registry {
                                                         )
                                                 }
                                             }
-                                            match std::fs::File::open(&native_path) {
+                                            match std::fs::File::open(&native_path_absolute) {
                                                 Ok(file) => native_file = file,
                                                 Err(err) => {
                                                     tracing::warn!(
                                                         "Failed to reopen native file '{}'. {:#}",
-                                                        native_path.display(),
+                                                        native_path_absolute.display(),
                                                         err,
                                                     );
                                                     return Err(FetchError::NativeIoError {
                                                         source: err,
-                                                        path: native_path.to_path_buf().into(),
+                                                        path: native_path_absolute
+                                                            .to_path_buf()
+                                                            .into(),
                                                     });
                                                 }
                                             }
@@ -701,10 +716,8 @@ impl Registry {
                     return Ok(None);
                 }
 
-                let native_path = native_absolute_path.into();
-
                 Ok(Some(FetchInfo {
-                    native_path,
+                    native_path: native_path_absolute.into(),
                     native_file,
                     version,
                 }))
