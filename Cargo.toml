@@ -19,7 +19,7 @@ goods-proc = { version = "=0.1.0", path = "proc" }
 goods-treasury = { version = "0.3.0", path = "treasury" }
 uuid = "0.8"
 thiserror = "1.0"
-serde = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ron = "0.6"
 bincode = "1.3"
