@@ -2,9 +2,9 @@
 
 [![crates](https://img.shields.io/crates/v/goods.svg?style=for-the-badge&label=goods)](https://crates.io/crates/goods)
 [![docs](https://img.shields.io/badge/docs.rs-goods-66c2a5?style=for-the-badge&labelColor=555555&logoColor=white)](https://docs.rs/goods)
-[![actions](https://img.shields.io/github/workflow/status/zakarumych/goods/badge/master?style=for-the-badge)](https://github.com/zakarumych/goods/actions?query=workflow%3ARust)
+[![actions](https://img.shields.io/github/workflow/status/arcana-engine/goods/badge/master?style=for-the-badge)](https://github.com/arcana-engine/goods/actions?query=workflow%3ARust)
 [![MIT/Apache](https://img.shields.io/badge/license-MIT%2FApache-blue.svg?style=for-the-badge)](COPYING)
-![loc](https://img.shields.io/tokei/lines/github/zakarumych/goods?style=for-the-badge)
+![loc](https://img.shields.io/tokei/lines/github/arcana-engine/goods?style=for-the-badge)
 
 
 `Goods` is an asset pipeline that helps keeping asset importing code away from the app\

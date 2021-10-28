@@ -5,8 +5,8 @@ authors = ["Zakarum <zakarumych@ya.ru>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"
 documentation = "https://docs.rs/goods-proc"
-homepage = "https://github.com/zakarumych/goods-proc"
-repository = "https://github.com/zakarumych/goods-proc"
+homepage = "https://github.com/arcana-engine/goods-proc"
+repository = "https://github.com/arcana-engine/goods-proc"
 description = "Proc-macro for \"goods\" crate"
 keywords = ["macro", "derive"]
 
