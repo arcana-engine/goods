@@ -560,9 +560,8 @@ impl Loader {
                                                                 source: data.source,
                                                             }),
                                                         );
-                                                        let wakers = std::mem::replace(
+                                                        let wakers = std::mem::take(
                                                             &mut entry.get_mut().wakers,
-                                                            Vec::new(),
                                                         );
                                                         for waker in wakers {
                                                             waker.wake();
@@ -589,9 +588,8 @@ impl Loader {
                                                     StateErased::Unloaded => {
                                                         entry.get_mut().state =
                                                             StateErased::Error(Error::new(err));
-                                                        let wakers = std::mem::replace(
+                                                        let wakers = std::mem::take(
                                                             &mut entry.get_mut().wakers,
-                                                            Vec::new(),
                                                         );
                                                         for waker in wakers {
                                                             waker.wake();
@@ -621,10 +619,8 @@ impl Loader {
                                         match &mut entry.get_mut().state {
                                             StateErased::Unloaded => {
                                                 entry.get_mut().state = StateErased::Missing;
-                                                let wakers = std::mem::replace(
-                                                    &mut entry.get_mut().wakers,
-                                                    Vec::new(),
-                                                );
+                                                let wakers =
+                                                    std::mem::take(&mut entry.get_mut().wakers);
                                                 for waker in wakers {
                                                     waker.wake();
                                                 }
@@ -649,10 +645,8 @@ impl Loader {
                                         match &mut entry.get_mut().state {
                                             StateErased::Unloaded => {
                                                 entry.get_mut().state = StateErased::Error(err);
-                                                let wakers = std::mem::replace(
-                                                    &mut entry.get_mut().wakers,
-                                                    Vec::new(),
-                                                );
+                                                let wakers =
+                                                    std::mem::take(&mut entry.get_mut().wakers);
                                                 for waker in wakers {
                                                     waker.wake();
                                                 }

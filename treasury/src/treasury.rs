@@ -186,7 +186,7 @@ impl Treasury {
         let goods = Treasury {
             registry: Arc::new(Mutex::new(Registry {
                 #[cfg(feature = "import")]
-                importers: Importers::new(&root),
+                importers: Importers::new(root),
                 root: root.into(),
                 data: Data {
                     assets: Vec::new(),
@@ -219,7 +219,7 @@ impl Treasury {
 
         let registry = Arc::new(Mutex::new(Registry {
             #[cfg(feature = "import")]
-            importers: Importers::new(&root),
+            importers: Importers::new(root),
             data,
             root: root.into(),
         }));
@@ -686,9 +686,7 @@ impl Registry {
                                                     );
                                                     return Err(FetchError::NativeIoError {
                                                         source: err,
-                                                        path: native_path_absolute
-                                                            .to_path_buf()
-                                                            .into(),
+                                                        path: native_path_absolute.into(),
                                                     });
                                                 }
                                             }

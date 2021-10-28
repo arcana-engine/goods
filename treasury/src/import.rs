@@ -1,6 +1,5 @@
 use {
     crate::treasury::Registry,
-    eyre::WrapErr,
     parking_lot::{Mutex, MutexGuard},
     std::{
         collections::hash_map::HashMap,
@@ -13,6 +12,9 @@ use {
     },
     wasmer_wasi::{WasiEnv, WasiState},
 };
+
+#[cfg(windows)]
+use eyre::WrapErr;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -113,7 +115,7 @@ impl Importers {
 
         imports.register("env", wasmer::import_namespace! {{
             "treasury_registry_store" => Function::new_native_with_env(&self.store, env.clone(), treasury_registry_store),
-            "treasury_registry_fetch" => Function::new_native_with_env(&self.store, env.clone(), treasury_registry_fetch),
+            "treasury_registry_fetch" => Function::new_native_with_env(&self.store, env, treasury_registry_fetch),
         }});
 
         let instance = Instance::new(&module, &imports)?;
