@@ -9,8 +9,8 @@
 //!
 //! [`goods-cli`] - CLI tool can be used to create goods instances, register assets and checks loading-importing process.
 //!
-//! [dummy]: https://github.com/zakarumych/goods/tree/overhaul/dummy
-//! [`goods-cli`]: https://github.com/zakarumych/goods/tree/overhaul/cli
+//! [dummy]: https://github.com/arcana-engine/goods/tree/overhaul/dummy
+//! [`goods-cli`]: https://github.com/arcana-engine/goods/tree/overhaul/cli
 //!
 
 mod asset;
