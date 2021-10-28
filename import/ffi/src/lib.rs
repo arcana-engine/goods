@@ -52,19 +52,19 @@ impl ImporterFFI {
             name: |data, buf, len| unsafe {
                 let name = (*(data as *mut I)).name();
                 let buf = std::slice::from_raw_parts_mut(buf, len);
-                buf[..len.min(name.len())].copy_from_slice(&name.as_bytes());
+                buf[..len.min(name.len())].copy_from_slice(name.as_bytes());
                 name.len()
             },
             source: |data, buf, len| unsafe {
                 let source = (*(data as *mut I)).source();
                 let buf = std::slice::from_raw_parts_mut(buf, len);
-                buf[..len.min(source.len())].copy_from_slice(&source.as_bytes());
+                buf[..len.min(source.len())].copy_from_slice(source.as_bytes());
                 source.len()
             },
             native: |data, buf, len| unsafe {
                 let native = (*(data as *mut I)).native();
                 let buf = std::slice::from_raw_parts_mut(buf, len);
-                buf[..len.min(native.len())].copy_from_slice(&native.as_bytes());
+                buf[..len.min(native.len())].copy_from_slice(native.as_bytes());
                 native.len()
             },
             import: |data, source_ptr, source_len, native_ptr, native_len, error_ptr, error_len| unsafe {
