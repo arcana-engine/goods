@@ -1,7 +1,16 @@
+use std::convert::Infallible;
+
+use smallvec::SmallVec;
+
+use crate::{
+    key::{hash_path_key, PathKey},
+    AssetId,
+};
+
 use {
     crate::{
         asset::{Asset, AssetBuild},
-        key::{hash_key, Key},
+        key::{hash_id_key, IdKey},
         source::{AssetData, Source},
         NotFound,
     },
@@ -19,28 +28,49 @@ use {
         task::{Context, Poll, Waker},
     },
     tracing::Instrument,
-    uuid::Uuid,
 };
 
-macro_rules! assets_inner {
-    ($sources:ident, $random_state:ident, $count:tt) => {{
-        {
-            let sources = $sources;
-            let random_state = $random_state;
-            let shards: Vec<_> = (0..$count * 4)
-                .map(|_| Arc::new(Mutex::new(HashMap::new())))
-                .collect();
-
-            let shards: Arc<Inner<[Shard]>> = Arc::new(Inner {
-                sources,
-                random_state,
-                cache: std::convert::TryInto::<[Shard; $count * 4]>::try_into(shards)
-                    .unwrap_or_else(|_| panic!()),
-            });
-            shards
-        }
-    }};
+#[derive(Clone, Copy)]
+pub enum Key<'a> {
+    Path(&'a str),
+    Id(AssetId),
 }
+
+impl Debug for Key<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Key::Path(path) => Debug::fmt(path, f),
+            Key::Id(id) => Debug::fmt(id, f),
+        }
+    }
+}
+
+impl Display for Key<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Key::Path(path) => Debug::fmt(path, f),
+            Key::Id(id) => Debug::fmt(id, f),
+        }
+    }
+}
+
+impl<'a, S> From<&'a S> for Key<'a>
+where
+    S: AsRef<str> + ?Sized,
+{
+    fn from(s: &'a S) -> Self {
+        Key::Path(s.as_ref())
+    }
+}
+
+impl From<AssetId> for Key<'_> {
+    fn from(id: AssetId) -> Self {
+        Key::Id(id)
+    }
+}
+
+/// Trait to signal that asset build is trivial. E.g. asset is decoded directly from bytes and `AssetBuild::build` simply returns the value.
+pub trait TrivialAssetBuild: for<'a> AssetBuild<(), BuildError = Infallible> {}
 
 /// This is default number of shards per CPU for shared hash map of asset states.
 const DEFAULT_SHARDS_PER_CPU: usize = 8;
@@ -72,26 +102,32 @@ impl Display for Error {
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        std::error::Error::source(&*self.0)
+        self.0.source()
     }
 }
 
 trait AnySource: Send + Sync + 'static {
-    fn load(&self, uuid: &Uuid) -> BoxFuture<Result<Option<AssetData>, Error>>;
-    fn update(&self, uuid: &Uuid, version: u64) -> BoxFuture<Result<Option<AssetData>, Error>>;
+    fn find(&self, path: &str, asset: &str) -> BoxFuture<Option<AssetId>>;
+    fn load(&self, id: AssetId) -> BoxFuture<Result<Option<AssetData>, Error>>;
+    fn update(&self, id: AssetId, version: u64) -> BoxFuture<Result<Option<AssetData>, Error>>;
 }
 
 impl<S> AnySource for S
 where
     S: Source,
 {
-    fn load(&self, uuid: &Uuid) -> BoxFuture<Result<Option<AssetData>, Error>> {
-        let fut = Source::load(self, uuid);
+    fn find(&self, path: &str, asset: &str) -> BoxFuture<Option<AssetId>> {
+        let fut = Source::find(self, path, asset);
+        Box::pin(fut)
+    }
+
+    fn load(&self, id: AssetId) -> BoxFuture<Result<Option<AssetData>, Error>> {
+        let fut = Source::load(self, id);
         Box::pin(fut.map_err(Error::new))
     }
 
-    fn update(&self, uuid: &Uuid, version: u64) -> BoxFuture<Result<Option<AssetData>, Error>> {
-        let fut = Source::update(self, uuid, version);
+    fn update(&self, id: AssetId, version: u64) -> BoxFuture<Result<Option<AssetData>, Error>> {
+        let fut = Source::update(self, id, version);
         Box::pin(fut.map_err(Error::new))
     }
 }
@@ -102,18 +138,7 @@ struct Data {
     source: usize,
 }
 
-async fn load_asset(sources: &[Box<dyn AnySource>], uuid: &Uuid) -> Result<Option<Data>, Error> {
-    for (index, source) in sources.iter().enumerate() {
-        if let Some(asset) = source.load(uuid).await? {
-            return Ok(Some(Data {
-                bytes: asset.bytes,
-                version: asset.version,
-                source: index,
-            }));
-        }
-    }
-    Ok(None)
-}
+type WakersVec = SmallVec<[Waker; 4]>;
 
 /// Builder for [`Loader`].
 /// Allows configure asset loader with required [`Source`]s.
@@ -181,29 +206,34 @@ impl LoaderBuilder {
         let random_state = RandomState::new();
         let sources: Arc<[_]> = self.sources.into();
 
-        let inner = match self.num_shards {
-            0..=1 => assets_inner!(sources, random_state, 1),
-            2..=2 => assets_inner!(sources, random_state, 2),
-            3..=4 => assets_inner!(sources, random_state, 4),
-            5..=8 => assets_inner!(sources, random_state, 8),
-            9..=16 => assets_inner!(sources, random_state, 16),
-            17..=32 => assets_inner!(sources, random_state, 32),
-            33..=64 => assets_inner!(sources, random_state, 64),
-            65..=128 => assets_inner!(sources, random_state, 128),
-            129..=256 => assets_inner!(sources, random_state, 256),
-            _ => assets_inner!(sources, random_state, 512),
-        };
+        let shards: Vec<_> = (0..self.num_shards)
+            .map(|_| Arc::new(Mutex::new(HashMap::new())))
+            .collect();
 
-        Loader { inner }
+        let path_shards: Vec<_> = (0..self.num_shards)
+            .map(|_| Arc::new(Mutex::new(HashMap::new())))
+            .collect();
+
+        Loader {
+            sources,
+            random_state,
+            cache: shards.into(),
+            path_cache: path_shards.into(),
+        }
     }
 }
 
-type Shard = Arc<Mutex<HashMap<Key, AssetEntry, RandomState>>>;
+type Shard = Arc<Mutex<HashMap<IdKey, AssetState, RandomState>>>;
+
+type PathShard = Arc<Mutex<HashMap<PathKey, PathAssetState, RandomState>>>;
 
 /// Virtual storage for all available assets.
 #[derive(Clone)]
 pub struct Loader {
-    inner: Arc<Inner<[Shard]>>,
+    sources: Arc<[Box<dyn AnySource>]>,
+    random_state: RandomState,
+    cache: Arc<[Shard]>,
+    path_cache: Arc<[PathShard]>,
 }
 
 enum StateTyped<A: Asset> {
@@ -220,16 +250,26 @@ enum StateTyped<A: Asset> {
     },
 }
 
-enum StateErased {
-    Unloaded,
+enum AssetState {
+    /// Not yet loaded asset.
+    Unloaded { wakers: WakeOnDrop },
+    /// Contains `StateTyped<A>` with specific `A`
     Typed(Box<dyn Any + Send + Sync>),
+    /// All sources reported that asset is missing.
     Missing,
+    /// Source reported loading error.
     Error(Error),
 }
 
-struct AssetEntry {
-    state: StateErased,
-    wakers: Vec<Waker>,
+enum PathAssetState {
+    /// Not yet loaded asset.
+    Unloaded { wakers: WakeOnDrop },
+
+    /// Asset is loaded. Lookup main entry by this id.
+    Loaded { id: AssetId },
+
+    /// All sources reported that asset is missing.
+    Missing,
 }
 
 enum AssetResultInner<A: Asset> {
@@ -237,9 +277,9 @@ enum AssetResultInner<A: Asset> {
     Error(Error),
     Missing,
     Decoded {
-        uuid: Uuid,
+        id: AssetId,
         key_hash: u64,
-        shard: Arc<Mutex<HashMap<Key, AssetEntry>>>,
+        shard: Shard,
     },
 }
 
@@ -261,12 +301,15 @@ impl<A> AssetResult<A>
 where
     A: Asset,
 {
-    pub fn get_optional<B>(&mut self, builder: &mut B) -> Result<Option<&A>, Error>
+    /// Builds and returns asset.
+    /// Returns `Err` if asset decoding or build errors.
+    /// Returns `Ok(None)` if asset is not found.
+    pub fn build_optional<B>(&mut self, builder: &mut B) -> Result<Option<&A>, Error>
     where
         A: AssetBuild<B>,
     {
         if let AssetResultInner::Decoded {
-            uuid,
+            id,
             key_hash,
             shard,
         } = &self.0
@@ -274,12 +317,12 @@ where
             let mut locked_shard = shard.lock();
             let entry = locked_shard
                 .raw_entry_mut()
-                .from_hash(*key_hash, |k| k.eq_key::<A>(uuid));
+                .from_hash(*key_hash, |k| k.eq_key::<A>(*id));
 
             match entry {
                 RawEntryMut::Vacant(_) => unreachable!(),
-                RawEntryMut::Occupied(mut entry) => match &mut entry.get_mut().state {
-                    StateErased::Typed(typed) => {
+                RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
+                    AssetState::Typed(typed) => {
                         let typed: &mut StateTyped<A> = typed.downcast_mut().unwrap();
 
                         match typed {
@@ -300,14 +343,14 @@ where
                                     }
                                     Err(err) => {
                                         let err = Error::new(err);
-                                        entry.get_mut().state = StateErased::Error(err.clone());
+                                        *entry.get_mut() = AssetState::Error(err.clone());
                                         drop(locked_shard);
                                         self.0 = AssetResultInner::Error(err);
                                     }
                                 },
                                 None => {
                                     let err = Error::new(AssetResultPoisoned);
-                                    entry.get_mut().state = StateErased::Error(err.clone());
+                                    *entry.get_mut() = AssetState::Error(err.clone());
                                     drop(locked_shard);
                                     self.0 = AssetResultInner::Error(err);
                                 }
@@ -319,13 +362,13 @@ where
                             }
                         }
                     }
-                    StateErased::Error(err) => {
+                    AssetState::Error(err) => {
                         let err = err.clone();
                         drop(locked_shard);
                         self.0 = AssetResultInner::Error(err);
                     }
-                    StateErased::Unloaded => unreachable!(),
-                    StateErased::Missing => unreachable!(),
+                    AssetState::Unloaded { .. } => unreachable!(),
+                    AssetState::Missing => unreachable!(),
                 },
             }
         }
@@ -338,11 +381,36 @@ where
         }
     }
 
-    pub fn get<B>(&mut self, builder: &mut B) -> Result<&A, Error>
+    /// Builds and returns asset.
+    /// Returns `Err` if asset decoding or build errors or if asset is not found.
+    pub fn build<B>(&mut self, builder: &mut B) -> Result<&A, Error>
     where
         A: AssetBuild<B>,
     {
-        self.get_optional(builder)?
+        self.build_optional(builder)?
+            .ok_or_else(|| Error::new(NotFound))
+    }
+
+    /// Returns asset.
+    /// Returns `Err` if asset decoding or build errors.
+    /// This function is only usable for `TrivialAssetBuild` implementors.
+    /// All `TrivialAsset`s implement `TrivialAssetBuild`.
+    pub fn get_optional(&mut self) -> Result<Option<&A>, Error>
+    where
+        A: TrivialAssetBuild,
+    {
+        self.build_optional(&mut ())
+    }
+
+    /// Returns asset.
+    /// Returns `Err` if asset decoding or build errors or if asset is not found.
+    /// This function is only usable for `TrivialAssetBuild` implementors.
+    /// All `TrivialAsset`s implement `TrivialAssetBuild`.
+    pub fn get(&mut self) -> Result<&A, Error>
+    where
+        A: TrivialAssetBuild,
+    {
+        self.build_optional(&mut ())?
             .ok_or_else(|| Error::new(NotFound))
     }
 }
@@ -351,10 +419,17 @@ enum AssetHandleInner<A> {
     Asset(A),
     Error(Error),
     Missing,
-    Pending {
-        uuid: Uuid,
+    Searching {
+        path: Arc<str>,
         key_hash: u64,
-        shard: Arc<Mutex<HashMap<Key, AssetEntry>>>,
+        path_shard: PathShard,
+        shards: Arc<[Shard]>,
+        random_state: RandomState,
+    },
+    Loading {
+        id: AssetId,
+        key_hash: u64,
+        shard: Shard,
     },
 }
 
@@ -372,44 +447,90 @@ where
     fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
         let me = self.get_mut();
 
-        match &me.0 {
-            AssetHandleInner::Asset(asset) => {
-                Poll::Ready(AssetResult(AssetResultInner::Asset(asset.clone())))
-            }
-            AssetHandleInner::Error(err) => {
-                Poll::Ready(AssetResult(AssetResultInner::Error(err.clone())))
-            }
-            AssetHandleInner::Missing => Poll::Ready(AssetResult(AssetResultInner::Missing)),
-            AssetHandleInner::Pending {
-                uuid,
-                key_hash,
-                shard,
-            } => {
-                let mut locked_shard = shard.lock();
-                let asset_entry = locked_shard
-                    .raw_entry_mut()
-                    .from_hash(*key_hash, |k| k.eq_key::<A>(uuid));
+        loop {
+            match &me.0 {
+                AssetHandleInner::Asset(asset) => {
+                    return Poll::Ready(AssetResult(AssetResultInner::Asset(asset.clone())))
+                }
+                AssetHandleInner::Error(err) => {
+                    return Poll::Ready(AssetResult(AssetResultInner::Error(err.clone())))
+                }
+                AssetHandleInner::Searching {
+                    path,
+                    path_shard,
+                    key_hash,
+                    shards,
+                    random_state,
+                } => {
+                    let mut locked_shard = path_shard.lock();
+                    let asset_entry = locked_shard
+                        .raw_entry_mut()
+                        .from_hash(*key_hash, |k| k.eq_key::<A>(path));
 
-                match asset_entry {
-                    RawEntryMut::Occupied(mut entry) => {
-                        let entry = entry.get_mut();
-                        match &entry.state {
-                            StateErased::Error(err) => {
+                    match asset_entry {
+                        RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
+                            PathAssetState::Missing => {
+                                drop(locked_shard);
+                                me.0 = AssetHandleInner::Missing;
+                                return Poll::Ready(AssetResult(AssetResultInner::Missing));
+                            }
+                            PathAssetState::Unloaded { wakers } => {
+                                wakers.push(ctx.waker().clone());
+                                return Poll::Pending;
+                            }
+                            PathAssetState::Loaded { id } => {
+                                let id = *id;
+                                let mut hasher = random_state.build_hasher();
+                                hash_id_key::<A, _>(id, &mut hasher);
+                                let key_hash = hasher.finish();
+
+                                let shard = shards[key_hash as usize % shards.len()].clone();
+
+                                drop(locked_shard);
+
+                                me.0 = AssetHandleInner::Loading {
+                                    id,
+                                    key_hash,
+                                    shard,
+                                };
+                            }
+                        },
+                        RawEntryMut::Vacant(_) => {
+                            unreachable!()
+                        }
+                    }
+                }
+                AssetHandleInner::Missing => {
+                    return Poll::Ready(AssetResult(AssetResultInner::Missing))
+                }
+                AssetHandleInner::Loading {
+                    id,
+                    key_hash,
+                    shard,
+                } => {
+                    let mut locked_shard = shard.lock();
+                    let asset_entry = locked_shard
+                        .raw_entry_mut()
+                        .from_hash(*key_hash, |k| k.eq_key::<A>(*id));
+
+                    return match asset_entry {
+                        RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
+                            AssetState::Error(err) => {
                                 let err = err.clone();
                                 drop(locked_shard);
                                 me.0 = AssetHandleInner::Error(err.clone());
                                 Poll::Ready(AssetResult(AssetResultInner::Error(err)))
                             }
-                            StateErased::Missing => {
+                            AssetState::Missing => {
                                 drop(locked_shard);
                                 me.0 = AssetHandleInner::Missing;
                                 Poll::Ready(AssetResult(AssetResultInner::Missing))
                             }
-                            StateErased::Unloaded => {
-                                entry.wakers.push(ctx.waker().clone());
+                            AssetState::Unloaded { wakers } => {
+                                wakers.push(ctx.waker().clone());
                                 Poll::Pending
                             }
-                            StateErased::Typed(typed) => {
+                            AssetState::Typed(typed) => {
                                 let typed: &StateTyped<A> = typed.downcast_ref().unwrap();
                                 match typed {
                                     StateTyped::Asset { asset, .. } => {
@@ -421,28 +542,22 @@ where
                                     StateTyped::Decoded { .. } => {
                                         drop(locked_shard);
                                         Poll::Ready(AssetResult(AssetResultInner::Decoded {
-                                            uuid: *uuid,
+                                            id: *id,
                                             key_hash: *key_hash,
                                             shard: shard.clone(),
                                         }))
                                     }
                                 }
                             }
+                        },
+                        RawEntryMut::Vacant(_) => {
+                            unreachable!()
                         }
-                    }
-                    RawEntryMut::Vacant(_) => {
-                        unreachable!()
-                    }
+                    };
                 }
             }
         }
     }
-}
-
-struct Inner<T: ?Sized> {
-    sources: Arc<[Box<dyn AnySource>]>,
-    random_state: RandomState,
-    cache: T,
 }
 
 impl Loader {
@@ -451,223 +566,394 @@ impl Loader {
         LoaderBuilder::new()
     }
 
-    /// Reads raw bytes with provided key
-    pub fn read(&self, uuid: &Uuid) -> impl Future<Output = Result<Box<[u8]>, Error>> {
-        let inner = Arc::clone(&self.inner);
-        let uuid = *uuid;
-        async move {
-            Ok(load_asset(&inner.sources, &uuid)
-                .await?
-                .ok_or_else(|| Error::new(NotFound))?
-                .bytes)
-        }
-    }
-
-    /// Load asset with specified uuid and returns handle
+    /// Load asset with specified id and returns handle
     /// that can be used to access assets once it is loaded.
     ///
     /// It asset was previously requested it will not be re-loaded,
     /// but handle to shared state will be returned instead,
     /// even if first load was not successful or different format was used.
-    #[tracing::instrument(skip(self))]
-    pub fn load<A>(&self, uuid: &Uuid) -> AssetHandle<A>
+    pub fn load<'a, A, K>(&self, key: K) -> AssetHandle<A>
     where
         A: Asset,
+        K: Into<Key<'a>>,
     {
-        // Hash asset key.
-        let mut hasher = self.inner.random_state.build_hasher();
-        hash_key::<A, _>(uuid, &mut hasher);
-        let key_hash = hasher.finish();
+        match key.into() {
+            Key::Path(path) => {
+                // Hash asset path key.
+                let mut hasher = self.random_state.build_hasher();
+                hash_path_key::<A, _>(path, &mut hasher);
+                let key_hash = hasher.finish();
 
-        // Use asset key hash to pick a shard.
-        // It will always pick same shard for same key.
-        let shards_len = self.inner.cache.len();
-        let shard = &self.inner.cache[(key_hash as usize % shards_len)];
+                // Use asset key hash to pick a shard.
+                // It will always pick same shard for same key.
+                let shards_len = self.path_cache.len();
+                let path_shard = &self.path_cache[(key_hash as usize % shards_len)];
 
-        // Lock picked shard.
-        let mut locked_shard = shard.lock();
+                // Lock picked shard.
+                let mut locked_shard = path_shard.lock();
 
-        // Find an entry into sharded hashmap.
-        let asset_entry = locked_shard
-            .raw_entry_mut()
-            .from_hash(key_hash, |k| k.eq_key::<A>(uuid));
+                // Find an entry into sharded hashmap.
+                let asset_entry = locked_shard
+                    .raw_entry_mut()
+                    .from_hash(key_hash, |k| k.eq_key::<A>(path));
 
-        match asset_entry {
-            RawEntryMut::Occupied(entry) => match &entry.get().state {
-                // Already queried. See status.
-                StateErased::Error(err) => AssetHandle(AssetHandleInner::Error(err.clone())),
-                StateErased::Missing => AssetHandle(AssetHandleInner::Missing),
-                StateErased::Unloaded => AssetHandle(AssetHandleInner::Pending {
-                    uuid: *uuid,
-                    key_hash,
-                    shard: shard.clone(),
-                }),
-                StateErased::Typed(typed) => {
-                    let typed: &StateTyped<A> = <dyn Any>::downcast_ref(&**typed).unwrap();
-                    match typed {
-                        StateTyped::Asset { asset, .. } => {
-                            AssetHandle(AssetHandleInner::Asset(asset.clone()))
+                match asset_entry {
+                    RawEntryMut::Occupied(entry) => match entry.get() {
+                        // Already queried. See status.
+                        PathAssetState::Missing => AssetHandle(AssetHandleInner::Missing),
+                        PathAssetState::Unloaded { .. } => {
+                            drop(locked_shard);
+
+                            AssetHandle(AssetHandleInner::Searching {
+                                path: path.into(),
+                                key_hash,
+                                path_shard: path_shard.clone(),
+                                shards: self.cache.clone(),
+                                random_state: self.random_state.clone(),
+                            })
                         }
-                        StateTyped::Decoded { .. } => AssetHandle(AssetHandleInner::Pending {
-                            uuid: *uuid,
+                        PathAssetState::Loaded { id } => {
+                            let id = *id;
+                            drop(locked_shard);
+
+                            // Hash asset key.
+                            let mut hasher = self.random_state.build_hasher();
+                            hash_id_key::<A, _>(id, &mut hasher);
+                            let key_hash = hasher.finish();
+
+                            // Use asset key hash to pick a shard.
+                            // It will always pick same shard for same key.
+                            let shards_len = self.cache.len();
+                            let shard = &self.cache[(key_hash as usize % shards_len)];
+
+                            AssetHandle(AssetHandleInner::Loading {
+                                id,
+                                key_hash,
+                                shard: shard.clone(),
+                            })
+                        }
+                    },
+                    RawEntryMut::Vacant(entry) => {
+                        let asset_key = PathKey::new::<A>(path.into());
+                        let path = asset_key.path.clone();
+
+                        // Register query
+                        let _ = entry.insert_hashed_nocheck(
+                            key_hash,
+                            asset_key,
+                            PathAssetState::Unloaded {
+                                wakers: WakeOnDrop::new(),
+                            },
+                        );
+                        drop(locked_shard);
+
+                        let loader = self.clone();
+                        let path_shard = path_shard.clone();
+
+                        let handle = AssetHandle(AssetHandleInner::Searching {
+                            path: path.clone(),
+                            key_hash,
+                            path_shard: path_shard.clone(),
+                            shards: self.cache.clone(),
+                            random_state: self.random_state.clone(),
+                        });
+
+                        tokio::spawn(
+                            async move {
+                                find_asset_task::<A>(&loader, path_shard, key_hash, &path).await;
+                            }
+                            .in_current_span(),
+                        );
+
+                        handle
+                    }
+                }
+            }
+            Key::Id(id) => {
+                // Hash asset key.
+                let mut hasher = self.random_state.build_hasher();
+                hash_id_key::<A, _>(id, &mut hasher);
+                let key_hash = hasher.finish();
+
+                // Use asset key hash to pick a shard.
+                // It will always pick same shard for same key.
+                let shards_len = self.cache.len();
+                let shard = &self.cache[(key_hash as usize % shards_len)];
+
+                // Lock picked shard.
+                let mut locked_shard = shard.lock();
+
+                // Find an entry into sharded hashmap.
+                let asset_entry = locked_shard
+                    .raw_entry_mut()
+                    .from_hash(key_hash, |k| k.eq_key::<A>(id));
+
+                match asset_entry {
+                    RawEntryMut::Occupied(entry) => match entry.get() {
+                        // Already queried. See status.
+                        AssetState::Error(err) => AssetHandle(AssetHandleInner::Error(err.clone())),
+                        AssetState::Missing => AssetHandle(AssetHandleInner::Missing),
+                        AssetState::Unloaded { .. } => AssetHandle(AssetHandleInner::Loading {
+                            id,
                             key_hash,
                             shard: shard.clone(),
                         }),
-                    }
-                }
-            },
-            RawEntryMut::Vacant(entry) => {
-                let asset_key = Key::new::<A>(*uuid);
-                // Register query
-                let _ = entry.insert_hashed_nocheck(
-                    key_hash,
-                    asset_key,
-                    AssetEntry {
-                        state: StateErased::Unloaded,
-                        wakers: Vec::new(),
-                    },
-                );
-                drop(locked_shard);
-
-                tokio::spawn({
-                    let uuid = *uuid;
-                    let inner = self.inner.clone();
-                    let shard = shard.clone();
-
-                    async move {
-                        match load_asset(&inner.sources, &uuid).await {
-                            Ok(Some(data)) => {
-                                tracing::debug!("Asset data for `{}` loaded", uuid);
-
-                                match A::decode(data.bytes, &Loader { inner }).await {
-                                    Ok(decoded) => {
-                                        let mut locked_shard = shard.lock();
-                                        let asset_entry = locked_shard
-                                            .raw_entry_mut()
-                                            .from_hash(key_hash, |k| k.eq_key::<A>(&uuid));
-
-                                        match asset_entry {
-                                            RawEntryMut::Vacant(_) => {
-                                                tracing::trace!("Asset already removed");
-                                            }
-                                            RawEntryMut::Occupied(mut entry) => {
-                                                match &mut entry.get_mut().state {
-                                                    StateErased::Unloaded => {
-                                                        entry.get_mut().state = StateErased::Typed(
-                                                            Box::new(StateTyped::<A>::Decoded {
-                                                                decoded: Some(decoded),
-                                                                version: data.version,
-                                                                source: data.source,
-                                                            }),
-                                                        );
-                                                        let wakers = std::mem::take(
-                                                            &mut entry.get_mut().wakers,
-                                                        );
-                                                        for waker in wakers {
-                                                            waker.wake();
-                                                        }
-                                                        drop(locked_shard);
-                                                    }
-                                                    _ => panic!("Unexpected asset state"),
-                                                }
-                                            }
-                                        }
-                                    }
-                                    Err(err) => {
-                                        let mut locked_shard = shard.lock();
-                                        let asset_entry = locked_shard
-                                            .raw_entry_mut()
-                                            .from_hash(key_hash, |k| k.eq_key::<A>(&uuid));
-
-                                        match asset_entry {
-                                            RawEntryMut::Vacant(_) => {
-                                                tracing::trace!("Asset already removed");
-                                            }
-                                            RawEntryMut::Occupied(mut entry) => {
-                                                match &mut entry.get_mut().state {
-                                                    StateErased::Unloaded => {
-                                                        entry.get_mut().state =
-                                                            StateErased::Error(Error::new(err));
-                                                        let wakers = std::mem::take(
-                                                            &mut entry.get_mut().wakers,
-                                                        );
-                                                        for waker in wakers {
-                                                            waker.wake();
-                                                        }
-                                                        drop(locked_shard);
-                                                    }
-                                                    _ => panic!("Unexpected asset state"),
-                                                }
-                                            }
-                                        }
-                                    }
+                        AssetState::Typed(typed) => {
+                            let typed: &StateTyped<A> = <dyn Any>::downcast_ref(&**typed).unwrap();
+                            match typed {
+                                StateTyped::Asset { asset, .. } => {
+                                    AssetHandle(AssetHandleInner::Asset(asset.clone()))
                                 }
-                            }
-                            Ok(None) => {
-                                tracing::warn!("Asset data for `{}` is not found", uuid);
-
-                                let mut locked_shard = shard.lock();
-                                let asset_entry = locked_shard
-                                    .raw_entry_mut()
-                                    .from_hash(key_hash, |k| k.eq_key::<A>(&uuid));
-
-                                match asset_entry {
-                                    RawEntryMut::Vacant(_) => {
-                                        tracing::trace!("Asset already removed");
-                                    }
-                                    RawEntryMut::Occupied(mut entry) => {
-                                        match &mut entry.get_mut().state {
-                                            StateErased::Unloaded => {
-                                                entry.get_mut().state = StateErased::Missing;
-                                                let wakers =
-                                                    std::mem::take(&mut entry.get_mut().wakers);
-                                                for waker in wakers {
-                                                    waker.wake();
-                                                }
-                                                drop(locked_shard);
-                                            }
-                                            _ => panic!("Unexpected asset state"),
-                                        }
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                let mut locked_shard = shard.lock();
-                                let asset_entry = locked_shard
-                                    .raw_entry_mut()
-                                    .from_hash(key_hash, |k| k.eq_key::<A>(&uuid));
-
-                                match asset_entry {
-                                    RawEntryMut::Vacant(_) => {
-                                        tracing::trace!("Asset already removed");
-                                    }
-                                    RawEntryMut::Occupied(mut entry) => {
-                                        match &mut entry.get_mut().state {
-                                            StateErased::Unloaded => {
-                                                entry.get_mut().state = StateErased::Error(err);
-                                                let wakers =
-                                                    std::mem::take(&mut entry.get_mut().wakers);
-                                                for waker in wakers {
-                                                    waker.wake();
-                                                }
-                                                drop(locked_shard);
-                                            }
-                                            _ => panic!("Unexpected asset state"),
-                                        }
-                                    }
+                                StateTyped::Decoded { .. } => {
+                                    AssetHandle(AssetHandleInner::Loading {
+                                        id,
+                                        key_hash,
+                                        shard: shard.clone(),
+                                    })
                                 }
                             }
                         }
-                    }
-                    .in_current_span()
-                });
+                    },
+                    RawEntryMut::Vacant(entry) => {
+                        let asset_key = IdKey::new::<A>(id);
 
-                AssetHandle(AssetHandleInner::Pending {
-                    uuid: *uuid,
-                    key_hash,
-                    shard: shard.clone(),
-                })
+                        // Register query
+                        let _ = entry.insert_hashed_nocheck(
+                            key_hash,
+                            asset_key,
+                            AssetState::Unloaded {
+                                wakers: WakeOnDrop::new(),
+                            },
+                        );
+                        drop(locked_shard);
+
+                        let loader = self.clone();
+                        let shard = shard.clone();
+
+                        let handle = AssetHandle(AssetHandleInner::Loading {
+                            id,
+                            key_hash,
+                            shard: shard.clone(),
+                        });
+
+                        tokio::spawn(
+                            async move {
+                                load_asset_task::<A>(&loader, shard, key_hash, id).await;
+                            }
+                            .in_current_span(),
+                        );
+
+                        handle
+                    }
+                }
             }
+        }
+    }
+}
+
+async fn load_asset_task<A: Asset>(loader: &Loader, shard: Shard, key_hash: u64, id: AssetId) {
+    let new_state = match load_asset(&loader.sources, id).await {
+        Err(err) => AssetState::Error(err),
+        Ok(None) => AssetState::Missing,
+        Ok(Some(data)) => {
+            let result = A::decode(data.bytes, loader).await;
+
+            match result {
+                Err(err) => AssetState::Error(Error::new(err)),
+                Ok(decoded) => {
+                    let typed = StateTyped::<A>::Decoded {
+                        decoded: Some(decoded),
+                        version: data.version,
+                        source: data.source,
+                    };
+
+                    AssetState::Typed(Box::new(typed))
+                }
+            }
+        }
+    };
+
+    // Asset not found. Change state and notify waters.
+    let mut locked_shard = shard.lock();
+
+    let entry = locked_shard
+        .raw_entry_mut()
+        .from_hash(key_hash, |k| k.eq_key::<A>(id));
+
+    match entry {
+        RawEntryMut::Vacant(_) => {
+            unreachable!("No other code could change the state")
+        }
+        RawEntryMut::Occupied(mut entry) => {
+            let entry = entry.get_mut();
+            match entry {
+                AssetState::Unloaded { .. } => {
+                    *entry = new_state;
+                }
+                _ => unreachable!("No other code could change the state"),
+            }
+        }
+    }
+}
+
+async fn find_asset_task<A: Asset>(
+    loader: &Loader,
+    path_shard: PathShard,
+    key_hash: u64,
+    path: &str,
+) {
+    match find_asset::<A>(&loader.sources, path).await {
+        None => {
+            // Asset not found. Change state and notify waters.
+            let mut locked_shard = path_shard.lock();
+
+            let entry = locked_shard
+                .raw_entry_mut()
+                .from_hash(key_hash, |k| k.eq_key::<A>(path));
+
+            match entry {
+                RawEntryMut::Vacant(_) => {
+                    unreachable!("No other code could change the state")
+                }
+                RawEntryMut::Occupied(mut entry) => {
+                    let entry = entry.get_mut();
+                    match entry {
+                        PathAssetState::Unloaded { .. } => {
+                            *entry = PathAssetState::Missing;
+                        }
+                        _ => unreachable!("No other code could change the state"),
+                    }
+                }
+            }
+        }
+        Some(id) => {
+            let mut moving_wakers = WakeOnDrop::new();
+
+            {
+                // Asset found. Change the state
+                let mut locked_shard = path_shard.lock();
+
+                let entry = locked_shard
+                    .raw_entry_mut()
+                    .from_hash(key_hash, |k| k.eq_key::<A>(path));
+
+                match entry {
+                    RawEntryMut::Vacant(_) => {
+                        unreachable!("No other code could change the state")
+                    }
+                    RawEntryMut::Occupied(mut entry) => {
+                        let state = entry.get_mut();
+                        match state {
+                            PathAssetState::Unloaded { wakers } => {
+                                // Decide what to do with wakers later.
+                                moving_wakers.append(&mut wakers.vec);
+                                *state = PathAssetState::Loaded { id };
+                            }
+                            _ => unreachable!("No other code could change the state"),
+                        }
+                    }
+                }
+            }
+
+            // Hash asset key.
+            let mut hasher = loader.random_state.build_hasher();
+            hash_id_key::<A, _>(id, &mut hasher);
+            let key_hash = hasher.finish();
+
+            // Check ID entry.
+            let shard_idx = key_hash as usize % loader.cache.len();
+            let shard = loader.cache[shard_idx].clone();
+
+            {
+                let mut locked_shard = shard.lock();
+
+                let entry = locked_shard
+                    .raw_entry_mut()
+                    .from_hash(key_hash, |k| k.eq_key::<A>(id));
+
+                match entry {
+                    RawEntryMut::Vacant(entry) => {
+                        // Asset was not requested by ID yet.
+                        let asset_key = IdKey::new::<A>(id);
+
+                        // Register query
+                        let _ = entry.insert_hashed_nocheck(
+                            key_hash,
+                            asset_key,
+                            AssetState::Unloaded {
+                                wakers: moving_wakers,
+                            }, // Put wakers here.
+                        );
+                    }
+                    RawEntryMut::Occupied(mut entry) => {
+                        match entry.get_mut() {
+                            AssetState::Unloaded { wakers } => {
+                                // Move wakers to ID entry.
+                                wakers.append(&mut moving_wakers.vec);
+                            }
+                            _ => {
+                                // Loading is complete one way or another.
+                                // Wake wakers from path entry.
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+
+            // Proceed loading by ID.
+            load_asset_task::<A>(loader, shard, key_hash, id).await;
+        }
+    }
+}
+
+async fn load_asset(sources: &[Box<dyn AnySource>], id: AssetId) -> Result<Option<Data>, Error> {
+    for (index, source) in sources.iter().enumerate() {
+        if let Some(asset) = source.load(id).await? {
+            return Ok(Some(Data {
+                bytes: asset.bytes,
+                version: asset.version,
+                source: index,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+async fn find_asset<A: Asset>(sources: &[Box<dyn AnySource>], path: &str) -> Option<AssetId> {
+    for source in sources {
+        if let Some(id) = source.find(path, A::name()).await {
+            return Some(id);
+        }
+    }
+    None
+}
+
+// Convenient type to wake wakers on scope exit.
+struct WakeOnDrop {
+    vec: WakersVec,
+}
+
+impl WakeOnDrop {
+    fn new() -> Self {
+        WakeOnDrop {
+            vec: WakersVec::new(),
+        }
+    }
+
+    fn append(&mut self, v: &mut WakersVec) {
+        self.vec.append(v);
+    }
+
+    fn push(&mut self, waker: Waker) {
+        self.vec.push(waker);
+    }
+}
+
+impl Drop for WakeOnDrop {
+    fn drop(&mut self) {
+        for waker in self.vec.drain(..) {
+            waker.wake()
         }
     }
 }
