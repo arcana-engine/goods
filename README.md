@@ -7,23 +7,18 @@
 ![loc](https://img.shields.io/tokei/lines/github/arcana-engine/goods?style=for-the-badge)
 
 
-`Goods` is an asset pipeline that helps keeping asset importing code away from the app\
-and allows addressing assets with uuids instead of error-prone file paths and urls.
+Goods is an asset system primarily designed for game engines.
+It supports definition of complex assets using powerful derive-macros and asynchronous loading with trait-based asset sources.
 
-`Goods` provides fully async loader. Loader can be augmented with user-defined source implementations,\
-making it possible to load asset from any kind of storage.\
-And thanks to async nature it can be both local and remote storages.
 
-`Treasury` is an asset database.\
-Once asset is imported it is given an `uuid` that can be used with provided out-of-the-box `TreasurySource` to load the assets.\
-On import `Treasury` calls user-defined importer to convert asset from authoring format into engine-native format.\
-Importers should be compiled into WASM library and placed into directory configured for importers lookup.\
-Provided `plugin` crate is an example of how to write a plugin and export importers from it.
+## Definition
 
-A CLI tool is provided to perform importing manually.\
-Running `cargo install goods-treasury-cli` should install the tool. CLI executable name is `treasury`.
+To define an asset users must implement `Asset` trait.
+Type that implements `Asset` traits are called assets and their values are produced by asset loading process.
 
-Engines using Goods pipeline are encouraged to support importing in their toolset.
+`Asset` trait is rather complex. Many of its parts looks like boilerplate when defining simple asset type.
+
+
 
 ## License
 
