@@ -78,7 +78,9 @@ struct NotFound;
 /// There are 2^64-1 valid values of this type that should be enough for now.
 ///
 /// Using `NonZero` makes `Option<AssetId>` same size as `AssetId` which is good for performance.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(transparent)]
 #[repr(transparent)]
 pub struct AssetId(pub NonZeroU64);
