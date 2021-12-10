@@ -47,11 +47,7 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
         .iter()
         .enumerate()
         .filter_map(|(index, attr)| {
-            if attr
-                .path
-                .get_ident()
-                .map_or(false, |ident| ident == "asset")
-            {
+            if attr.path.is_ident("asset") {
                 Some(index)
             } else {
                 None
@@ -89,11 +85,7 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
     let serde_attributes = derive_input
         .attrs
         .iter()
-        .filter(|attr| {
-            attr.path
-                .get_ident()
-                .map_or(false, |ident| ident == "serde")
-        })
+        .filter(|attr| attr.path.is_ident("serde"))
         .cloned()
         .collect();
 
@@ -140,11 +132,7 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
             .iter()
             .enumerate()
             .filter_map(|(index, attr)| {
-                if attr
-                    .path
-                    .get_ident()
-                    .map_or(false, |ident| ident == "asset")
-                {
+                if attr.path.is_ident("asset") {
                     Some(index)
                 } else {
                     None
@@ -152,11 +140,10 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
             })
             .collect::<Vec<_>>();
 
-        let serde_attributes = field.attrs.iter().filter(|attr| {
-            attr.path
-                .get_ident()
-                .map_or(false, |ident| ident == "serde")
-        });
+        let serde_attributes = field
+            .attrs
+            .iter()
+            .filter(|attr| attr.path.is_ident("serde"));
 
         let ty = &field.ty;
 
