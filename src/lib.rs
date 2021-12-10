@@ -55,7 +55,8 @@ mod loader;
 pub mod source;
 
 use std::{
-    fmt::{self, Display},
+    fmt::{self, Debug, Display, LowerHex, UpperHex},
+    marker::PhantomData,
     num::NonZeroU64,
 };
 
@@ -79,7 +80,7 @@ struct NotFound;
 ///
 /// Using `NonZero` makes `Option<AssetId>` same size as `AssetId` which is good for performance.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 #[serde(transparent)]
 #[repr(transparent)]
@@ -94,9 +95,90 @@ impl AssetId {
     }
 }
 
+impl Debug for AssetId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LowerHex::fmt(&self.0.get(), f)
+    }
+}
+
 impl Display for AssetId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0.get(), f)
+        LowerHex::fmt(&self.0.get(), f)
+    }
+}
+
+impl LowerHex for AssetId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LowerHex::fmt(&self.0.get(), f)
+    }
+}
+
+impl UpperHex for AssetId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        UpperHex::fmt(&self.0.get(), f)
+    }
+}
+
+/// `AssetId` augmented with type information, specifying which asset type is referenced.
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
+#[repr(transparent)]
+pub struct TypeAssetId<A> {
+    pub id: AssetId,
+    pub marker: PhantomData<fn() -> A>,
+}
+
+impl<A> Debug for TypeAssetId<A>
+where
+    A: Asset,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}({:#?})", A::name(), self.id)
+        } else {
+            write!(f, "{}({:?})", A::name(), self.id)
+        }
+    }
+}
+
+impl<A> Display for TypeAssetId<A>
+where
+    A: Asset,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}({:#})", A::name(), self.id)
+        } else {
+            write!(f, "{}({:})", A::name(), self.id)
+        }
+    }
+}
+
+impl<A> LowerHex for TypeAssetId<A>
+where
+    A: Asset,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}({:#x})", A::name(), self.id)
+        } else {
+            write!(f, "{}({:x})", A::name(), self.id)
+        }
+    }
+}
+
+impl<A> UpperHex for TypeAssetId<A>
+where
+    A: Asset,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "{}({:#X})", A::name(), self.id)
+        } else {
+            write!(f, "{}({:X})", A::name(), self.id)
+        }
     }
 }
 
