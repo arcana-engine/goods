@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::{
     key::{hash_path_key, PathKey},
-    AssetId, TypeAssetId,
+    AssetId, TypedAssetId,
 };
 
 use {
@@ -572,7 +572,7 @@ impl Loader {
     /// If asset was previously requested it will not be re-loaded,
     /// but handle to shared state will be returned instead,
     /// even if first load was not successful or different format was used.
-    pub fn load_typed<A>(&self, id: TypeAssetId<A>) -> AssetHandle<A>
+    pub fn load_typed<A>(&self, id: TypedAssetId<A>) -> AssetHandle<A>
     where
         A: Asset,
     {
