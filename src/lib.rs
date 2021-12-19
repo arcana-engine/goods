@@ -55,6 +55,7 @@ mod loader;
 pub mod source;
 
 use std::{
+    borrow::Borrow,
     fmt::{self, Debug, Display, LowerHex, UpperHex},
     marker::PhantomData,
     num::NonZeroU64,
@@ -125,12 +126,18 @@ impl UpperHex for AssetId {
 )]
 #[serde(transparent)]
 #[repr(transparent)]
-pub struct TypeAssetId<A> {
+pub struct TypedAssetId<A> {
     pub id: AssetId,
     pub marker: PhantomData<fn() -> A>,
 }
 
-impl<A> Debug for TypeAssetId<A>
+impl<A> Borrow<AssetId> for TypedAssetId<A> {
+    fn borrow(&self) -> &AssetId {
+        &self.id
+    }
+}
+
+impl<A> Debug for TypedAssetId<A>
 where
     A: Asset,
 {
@@ -143,7 +150,7 @@ where
     }
 }
 
-impl<A> Display for TypeAssetId<A>
+impl<A> Display for TypedAssetId<A>
 where
     A: Asset,
 {
@@ -156,7 +163,7 @@ where
     }
 }
 
-impl<A> LowerHex for TypeAssetId<A>
+impl<A> LowerHex for TypedAssetId<A>
 where
     A: Asset,
 {
@@ -169,7 +176,7 @@ where
     }
 }
 
-impl<A> UpperHex for TypeAssetId<A>
+impl<A> UpperHex for TypedAssetId<A>
 where
     A: Asset,
 {
