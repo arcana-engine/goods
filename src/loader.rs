@@ -70,7 +70,9 @@ impl From<AssetId> for Key<'_> {
 }
 
 /// Trait to signal that asset build is trivial. E.g. asset is decoded directly from bytes and `AssetBuild::build` simply returns the value.
-pub trait TrivialAssetBuild: for<'a> AssetBuild<(), BuildError = Infallible> {}
+pub trait TrivialAssetBuild: AssetBuild<(), BuildError = Infallible> {}
+
+impl<A> TrivialAssetBuild for A where A: AssetBuild<(), BuildError = Infallible> {}
 
 /// This is default number of shards per CPU for shared hash map of asset states.
 const DEFAULT_SHARDS_PER_CPU: usize = 8;
