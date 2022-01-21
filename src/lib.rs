@@ -22,6 +22,7 @@
 //!
 //! /// Trivial asset type.
 //! #[derive(Clone, Asset)]
+//! #[asset(name = "bar")]
 //! struct Bar;
 //!
 //! /// Asset field type. `AssetField<Container>` implementation is generated, but not `Asset` implementation.
@@ -32,18 +33,19 @@
 //! /// Asset structure. Implements Asset trait using
 //! /// two generated structures are intermediate phases.
 //! #[derive(Clone, Asset)]
+//! #[asset(name = "assetstruct")]
 //! struct AssetStruct {
 //!     /// Deserializable types are inlined into asset as is.
 //!     foo: Foo,
 //!
 //!     /// `AssetField<External>` is implemented for all `Asset` implementors.
 //!     /// Deserialized as `AssetId` and loaded recursively.
-//!     #[external]
+//!     #[asset(external)]
 //!     bar: Bar,
 //!
 //!     /// Container fields are deserialized similar to types that derive `Asset`.
 //!     /// If there is no external asset somewhere in hierarchy, decoded `Baz` is structurally equivalent to `Baz`.
-//!     #[container]
+//!     #[asset(container)]
 //!     baz: Baz,
 //! }
 //! ```
