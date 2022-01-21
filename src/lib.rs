@@ -59,6 +59,8 @@ use std::{
     fmt::{self, Debug, Display, LowerHex, UpperHex},
     marker::PhantomData,
     num::NonZeroU64,
+    str::FromStr,
+    sync::Arc,
 };
 
 pub use self::{
@@ -72,18 +74,23 @@ pub use goods_proc::{Asset, AssetField};
 #[doc(hidden)]
 pub use {bincode, serde, serde_json, std::convert::Infallible, thiserror};
 
-#[derive(Debug, thiserror::Error)]
-#[error("Not found")]
-struct NotFound;
+#[derive(thiserror::Error)]
+#[error("Asset '{key}' is not found")]
+struct NotFound {
+    key: Arc<str>,
+}
+
+impl fmt::Debug for NotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
+    }
+}
 
 /// Type for unique asset identification.
 /// There are 2^64-1 valid values of this type that should be enough for now.
 ///
 /// Using `NonZero` makes `Option<AssetId>` same size as `AssetId` which is good for performance.
-#[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-#[serde(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct AssetId(pub NonZeroU64);
 
@@ -92,6 +99,60 @@ impl AssetId {
         match NonZeroU64::new(value) {
             None => None,
             Some(value) => Some(AssetId(value)),
+        }
+    }
+}
+
+impl serde::Serialize for AssetId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use std::io::Write;
+
+        if serializer.is_human_readable() {
+            let mut hex = [0u8; 16];
+            write!(std::io::Cursor::new(&mut hex[..]), "{:x}", self.0).expect("Must fit");
+            debug_assert!(hex.is_ascii());
+            let hex = std::str::from_utf8(&hex).expect("Must be UTF-8");
+            serializer.serialize_str(hex)
+        } else {
+            serializer.serialize_u64(self.0.get())
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AssetId {
+    fn deserialize<D>(deserializer: D) -> Result<AssetId, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            let hex = std::borrow::Cow::<str>::deserialize(deserializer)?;
+            hex.parse().map_err(serde::de::Error::custom)
+        } else {
+            let value = NonZeroU64::deserialize(deserializer)?;
+            Ok(AssetId(value))
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ParseAssetIdError {
+    #[error(transparent)]
+    ParseIntError(#[from] std::num::ParseIntError),
+
+    #[error("AssetId cannot be zero")]
+    ZeroId,
+}
+
+impl FromStr for AssetId {
+    type Err = ParseAssetIdError;
+    fn from_str(s: &str) -> Result<Self, ParseAssetIdError> {
+        let value = u64::from_str_radix(s, 16)?;
+        match NonZeroU64::new(value) {
+            None => Err(ParseAssetIdError::ZeroId),
+            Some(value) => Ok(AssetId(value)),
         }
     }
 }
