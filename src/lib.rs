@@ -68,7 +68,7 @@ use std::{
 pub use self::{
     asset::{Asset, AssetBuild, SimpleAsset, TrivialAsset},
     field::{AssetField, AssetFieldBuild, Container, External},
-    loader::{AssetHandle, AssetResult, AssetResultPoisoned, Error, Loader, LoaderBuilder},
+    loader::{AssetHandle, AssetResult, AssetResultPoisoned, Error, Key, Loader, LoaderBuilder},
 };
 pub use goods_proc::{Asset, AssetField};
 
@@ -191,7 +191,19 @@ impl UpperHex for AssetId {
 #[repr(transparent)]
 pub struct TypedAssetId<A> {
     pub id: AssetId,
-    pub marker: PhantomData<fn() -> A>,
+    pub marker: PhantomData<A>,
+}
+
+impl<A> TypedAssetId<A> {
+    pub const fn new(value: u64) -> Option<Self> {
+        match AssetId::new(value) {
+            None => None,
+            Some(id) => Some(TypedAssetId {
+                id,
+                marker: PhantomData,
+            }),
+        }
+    }
 }
 
 impl<A> Borrow<AssetId> for TypedAssetId<A> {

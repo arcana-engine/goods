@@ -274,7 +274,7 @@ enum PathAssetState {
     Missing,
 }
 
-enum AssetResultInner<A: Asset> {
+enum AssetResultInner<A> {
     Asset(A),
     Error(Error),
     Missing,
@@ -296,7 +296,7 @@ impl Display for AssetResultPoisoned {
 
 impl std::error::Error for AssetResultPoisoned {}
 
-pub struct AssetResult<A: Asset> {
+pub struct AssetResult<A> {
     key: Arc<str>,
     inner: AssetResultInner<A>,
 }
@@ -465,28 +465,26 @@ pub struct AssetHandle<A> {
     inner: AssetHandleInner<A>,
 }
 
-impl<A> Unpin for AssetHandle<A> {}
-
-impl<A> Future for AssetHandle<A>
+impl<A> AssetHandle<A>
 where
     A: Asset,
 {
-    type Output = AssetResult<A>;
+    pub fn get_ready(&mut self) -> Option<AssetResult<A>> {
+        self.get_impl(|| None)
+    }
 
-    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Self::Output> {
-        let me = self.get_mut();
-
+    pub fn get_impl(&mut self, waker: impl FnOnce() -> Option<Waker>) -> Option<AssetResult<A>> {
         loop {
-            match &me.inner {
+            match &self.inner {
                 AssetHandleInner::Asset(asset) => {
-                    return Poll::Ready(AssetResult {
-                        key: me.key.clone(),
+                    return Some(AssetResult {
+                        key: self.key.clone(),
                         inner: AssetResultInner::Asset(asset.clone()),
                     })
                 }
                 AssetHandleInner::Error(err) => {
-                    return Poll::Ready(AssetResult {
-                        key: me.key.clone(),
+                    return Some(AssetResult {
+                        key: self.key.clone(),
                         inner: AssetResultInner::Error(err.clone()),
                     })
                 }
@@ -506,15 +504,15 @@ where
                         RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
                             PathAssetState::Missing => {
                                 drop(locked_shard);
-                                me.inner = AssetHandleInner::Missing;
-                                return Poll::Ready(AssetResult {
-                                    key: me.key.clone(),
+                                self.inner = AssetHandleInner::Missing;
+                                return Some(AssetResult {
+                                    key: self.key.clone(),
                                     inner: AssetResultInner::Missing,
                                 });
                             }
                             PathAssetState::Unloaded { wakers } => {
-                                wakers.push(ctx.waker().clone());
-                                return Poll::Pending;
+                                waker().map(|waker| wakers.push(waker));
+                                return None;
                             }
                             PathAssetState::Loaded { id } => {
                                 let id = *id;
@@ -526,7 +524,7 @@ where
 
                                 drop(locked_shard);
 
-                                me.inner = AssetHandleInner::Loading {
+                                self.inner = AssetHandleInner::Loading {
                                     id,
                                     key_hash,
                                     shard,
@@ -539,8 +537,8 @@ where
                     }
                 }
                 AssetHandleInner::Missing => {
-                    return Poll::Ready(AssetResult {
-                        key: me.key.clone(),
+                    return Some(AssetResult {
+                        key: self.key.clone(),
                         inner: AssetResultInner::Missing,
                     })
                 }
@@ -559,23 +557,23 @@ where
                             AssetState::Error(err) => {
                                 let err = err.clone();
                                 drop(locked_shard);
-                                me.inner = AssetHandleInner::Error(err.clone());
-                                Poll::Ready(AssetResult {
-                                    key: me.key.clone(),
+                                self.inner = AssetHandleInner::Error(err.clone());
+                                Some(AssetResult {
+                                    key: self.key.clone(),
                                     inner: AssetResultInner::Error(err),
                                 })
                             }
                             AssetState::Missing => {
                                 drop(locked_shard);
-                                me.inner = AssetHandleInner::Missing;
-                                Poll::Ready(AssetResult {
-                                    key: me.key.clone(),
+                                self.inner = AssetHandleInner::Missing;
+                                Some(AssetResult {
+                                    key: self.key.clone(),
                                     inner: AssetResultInner::Missing,
                                 })
                             }
                             AssetState::Unloaded { wakers } => {
-                                wakers.push(ctx.waker().clone());
-                                Poll::Pending
+                                waker().map(|waker| wakers.push(waker));
+                                None
                             }
                             AssetState::Typed(typed) => {
                                 let typed: &StateTyped<A> = typed.downcast_ref().unwrap();
@@ -583,16 +581,16 @@ where
                                     StateTyped::Asset { asset, .. } => {
                                         let asset = asset.clone();
                                         drop(locked_shard);
-                                        me.inner = AssetHandleInner::Asset(asset.clone());
-                                        Poll::Ready(AssetResult {
-                                            key: me.key.clone(),
+                                        self.inner = AssetHandleInner::Asset(asset.clone());
+                                        Some(AssetResult {
+                                            key: self.key.clone(),
                                             inner: AssetResultInner::Asset(asset),
                                         })
                                     }
                                     StateTyped::Decoded { .. } => {
                                         drop(locked_shard);
-                                        Poll::Ready(AssetResult {
-                                            key: me.key.clone(),
+                                        Some(AssetResult {
+                                            key: self.key.clone(),
                                             inner: AssetResultInner::Decoded {
                                                 id: *id,
                                                 key_hash: *key_hash,
@@ -609,6 +607,24 @@ where
                     };
                 }
             }
+        }
+    }
+}
+
+impl<A> Unpin for AssetHandle<A> {}
+
+impl<A> Future for AssetHandle<A>
+where
+    A: Asset,
+{
+    type Output = AssetResult<A>;
+
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<AssetResult<A>> {
+        let me = self.get_mut();
+
+        match me.get_impl(|| Some(ctx.waker().clone())) {
+            None => Poll::Pending,
+            Some(result) => Poll::Ready(result),
         }
     }
 }
