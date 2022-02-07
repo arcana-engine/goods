@@ -16,7 +16,7 @@ treasury = ["treasury-client", "eyre", "url", "dunce"]
 
 [dependencies]
 goods-proc = { version = "=0.1.0", path = "proc" }
-treasury-client = { version = "0.0.0", optional = true, git = "https://github.com/arcana-engine/treasury.git" }
+treasury-client = { version = "0.1.0", optional = true }
 thiserror = "1.0"
 smallvec = "1.7"
 serde = { version = "1.0", features = ["derive"] }
