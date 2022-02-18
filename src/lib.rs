@@ -62,31 +62,21 @@ use std::{
     marker::PhantomData,
     num::NonZeroU64,
     str::FromStr,
-    sync::Arc,
 };
 
 pub use self::{
     asset::{Asset, AssetBuild, SimpleAsset, TrivialAsset},
     field::{AssetField, AssetFieldBuild, Container, External},
-    loader::{AssetHandle, AssetResult, AssetResultPoisoned, Error, Key, Loader, LoaderBuilder},
+    loader::{
+        AssetHandle, AssetLookup, AssetResult, AssetResultPoisoned, Error, Key, Loader,
+        LoaderBuilder, NotFound,
+    },
 };
 pub use goods_proc::{Asset, AssetField};
 
 // Used by generated code.
 #[doc(hidden)]
 pub use {bincode, serde, serde_json, std::convert::Infallible, thiserror};
-
-#[derive(thiserror::Error)]
-#[error("Asset '{key}' is not found")]
-struct NotFound {
-    key: Arc<str>,
-}
-
-impl fmt::Debug for NotFound {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Display::fmt(self, f)
-    }
-}
 
 /// Type for unique asset identification.
 /// There are 2^64-1 valid values of this type that should be enough for now.

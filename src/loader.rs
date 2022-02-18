@@ -1,33 +1,30 @@
-use std::convert::Infallible;
+use std::{
+    any::Any,
+    convert::Infallible,
+    fmt::{self, Debug, Display},
+    future::Future,
+    hash::{BuildHasher, Hasher},
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll, Waker},
+};
 
+use ahash::RandomState;
+use futures::future::{BoxFuture, TryFutureExt as _};
+use hashbrown::hash_map::{HashMap, RawEntryMut};
+use parking_lot::Mutex;
 use smallvec::SmallVec;
+use tracing::Instrument;
 
 use crate::{
     key::{hash_path_key, PathKey},
     AssetId, TypedAssetId,
 };
 
-use {
-    crate::{
-        asset::{Asset, AssetBuild},
-        key::{hash_id_key, IdKey},
-        source::{AssetData, Source},
-        NotFound,
-    },
-    ahash::RandomState,
-    futures::future::{BoxFuture, TryFutureExt as _},
-    hashbrown::hash_map::{HashMap, RawEntryMut},
-    parking_lot::Mutex,
-    std::{
-        any::Any,
-        fmt::{self, Debug, Display},
-        future::Future,
-        hash::{BuildHasher, Hasher},
-        pin::Pin,
-        sync::Arc,
-        task::{Context, Poll, Waker},
-    },
-    tracing::Instrument,
+use crate::{
+    asset::{Asset, AssetBuild},
+    key::{hash_id_key, IdKey},
+    source::{AssetData, Source},
 };
 
 #[derive(Clone, Copy)]
@@ -66,6 +63,29 @@ where
 impl From<AssetId> for Key<'_> {
     fn from(id: AssetId) -> Self {
         Key::Id(id)
+    }
+}
+
+#[derive(thiserror::Error)]
+pub struct NotFound {
+    pub path: Option<Arc<str>>,
+    pub id: Option<AssetId>,
+}
+
+impl fmt::Display for NotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (&self.path, &self.id) {
+            (None, None) => f.write_str("Failed to load an asset. [No AssetId or path provided]"),
+            (Some(path), None) => write!(f, "Failed to load asset '{}'", path),
+            (None, Some(id)) => write!(f, "Failed to load asset '{}'", id),
+            (Some(path), Some(id)) => write!(f, "Failed to load asset '{} @ {}'", id, path),
+        }
+    }
+}
+
+impl fmt::Debug for NotFound {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(self, f)
     }
 }
 
@@ -274,12 +294,12 @@ enum PathAssetState {
     Missing,
 }
 
-enum AssetResultInner<A> {
+enum AssetResultState<A> {
     Asset(A),
     Error(Error),
     Missing,
     Decoded {
-        id: AssetId,
+        // id: AssetId,
         key_hash: u64,
         shard: Shard,
     },
@@ -297,31 +317,32 @@ impl Display for AssetResultPoisoned {
 impl std::error::Error for AssetResultPoisoned {}
 
 pub struct AssetResult<A> {
-    key: Arc<str>,
-    inner: AssetResultInner<A>,
+    path: Option<Arc<str>>,
+    id: Option<AssetId>,
+    state: AssetResultState<A>,
 }
 
-impl<A> AssetResultInner<A>
+impl<A> AssetResultState<A>
 where
     A: Asset,
 {
     /// Builds and returns asset.
     /// Returns `Err` if asset decoding or build errors.
     /// Returns `Ok(None)` if asset is not found.
-    pub fn build_optional<B>(&mut self, builder: &mut B) -> Result<Option<&A>, Error>
+    pub fn build_optional<B>(
+        &mut self,
+        id: Option<AssetId>,
+        builder: &mut B,
+    ) -> Result<Option<&A>, Error>
     where
         A: AssetBuild<B>,
     {
-        if let AssetResultInner::Decoded {
-            id,
-            key_hash,
-            shard,
-        } = &self
-        {
+        if let AssetResultState::Decoded { key_hash, shard } = &self {
+            let id = id.expect("This state can be reached only with known id");
             let mut locked_shard = shard.lock();
             let entry = locked_shard
                 .raw_entry_mut()
-                .from_hash(*key_hash, |k| k.eq_key::<A>(*id));
+                .from_hash(*key_hash, |k| k.eq_key::<A>(id));
 
             match entry {
                 RawEntryMut::Vacant(_) => unreachable!(),
@@ -343,33 +364,33 @@ where
                                             source: *source,
                                         };
                                         drop(locked_shard);
-                                        *self = AssetResultInner::Asset(asset);
+                                        *self = AssetResultState::Asset(asset);
                                     }
                                     Err(err) => {
                                         let err = Error::new(err);
                                         *entry.get_mut() = AssetState::Error(err.clone());
                                         drop(locked_shard);
-                                        *self = AssetResultInner::Error(err);
+                                        *self = AssetResultState::Error(err);
                                     }
                                 },
                                 None => {
                                     let err = Error::new(AssetResultPoisoned);
                                     *entry.get_mut() = AssetState::Error(err.clone());
                                     drop(locked_shard);
-                                    *self = AssetResultInner::Error(err);
+                                    *self = AssetResultState::Error(err);
                                 }
                             },
                             StateTyped::Asset { asset, .. } => {
                                 let asset = asset.clone();
                                 drop(locked_shard);
-                                *self = AssetResultInner::Asset(asset);
+                                *self = AssetResultState::Asset(asset);
                             }
                         }
                     }
                     AssetState::Error(err) => {
                         let err = err.clone();
                         drop(locked_shard);
-                        *self = AssetResultInner::Error(err);
+                        *self = AssetResultState::Error(err);
                     }
                     AssetState::Unloaded { .. } => unreachable!(),
                     AssetState::Missing => unreachable!(),
@@ -378,10 +399,10 @@ where
         }
 
         match self {
-            AssetResultInner::Missing => Ok(None),
-            AssetResultInner::Asset(asset) => Ok(Some(asset)),
-            AssetResultInner::Error(err) => Err(err.clone()),
-            AssetResultInner::Decoded { .. } => unreachable!(),
+            AssetResultState::Missing => Ok(None),
+            AssetResultState::Asset(asset) => Ok(Some(asset)),
+            AssetResultState::Error(err) => Err(err.clone()),
+            AssetResultState::Decoded { .. } => unreachable!(),
         }
     }
 }
@@ -390,25 +411,40 @@ impl<A> AssetResult<A>
 where
     A: Asset,
 {
+    /// Returns path if fetched by path.
+    #[inline]
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref()
+    }
+
+    /// Returns AssetId unless fetched by path and is not found.
+    #[inline]
+    pub fn id(&self) -> Option<AssetId> {
+        self.id
+    }
+
     /// Builds and returns asset.
     /// Returns `Err` if asset decoding or build errors.
     /// Returns `Ok(None)` if asset is not found.
+    #[inline]
     pub fn build_optional<B>(&mut self, builder: &mut B) -> Result<Option<&A>, Error>
     where
         A: AssetBuild<B>,
     {
-        self.inner.build_optional(builder)
+        self.state.build_optional(self.id, builder)
     }
 
     /// Builds and returns asset.
     /// Returns `Err` if asset decoding or build errors or if asset is not found.
+    #[inline]
     pub fn build<B>(&mut self, builder: &mut B) -> Result<&A, Error>
     where
         A: AssetBuild<B>,
     {
-        match self.inner.build_optional(builder)? {
+        match self.state.build_optional(self.id, builder)? {
             None => Err(Error::new(NotFound {
-                key: self.key.clone(),
+                path: self.path.clone(),
+                id: self.id.clone(),
             })),
             Some(asset) => Ok(asset),
         }
@@ -418,6 +454,7 @@ where
     /// Returns `Err` if asset decoding or build errors.
     /// This function is only usable for `TrivialAssetBuild` implementors.
     /// All `TrivialAsset`s implement `TrivialAssetBuild`.
+    #[inline]
     pub fn get_optional(&mut self) -> Result<Option<&A>, Error>
     where
         A: TrivialAssetBuild,
@@ -429,40 +466,43 @@ where
     /// Returns `Err` if asset decoding or build errors or if asset is not found.
     /// This function is only usable for `TrivialAssetBuild` implementors.
     /// All `TrivialAsset`s implement `TrivialAssetBuild`.
+    #[inline]
     pub fn get(&mut self) -> Result<&A, Error>
     where
         A: TrivialAssetBuild,
     {
-        match self.inner.build_optional(&mut ())? {
-            None => Err(Error::new(NotFound {
-                key: self.key.clone(),
-            })),
-            Some(asset) => Ok(asset),
-        }
+        self.build(&mut ())
     }
 }
 
-enum AssetHandleInner<A> {
-    Asset(A),
-    Error(Error),
+enum AssetHandleState<A> {
+    Asset {
+        asset: A,
+    },
+    Error {
+        error: Error,
+    },
     Missing,
     Searching {
-        path: Arc<str>,
         key_hash: u64,
         path_shard: PathShard,
         shards: Arc<[Shard]>,
         random_state: RandomState,
     },
     Loading {
-        id: AssetId,
         key_hash: u64,
         shard: Shard,
     },
 }
 
+/// Handle for a requested asset.
+/// Can be polled manually or as a `Future`.
+/// Resolves into `AssetResult<A>` which can be used
+/// to build the asset instance, or just take if it is ready.
 pub struct AssetHandle<A> {
-    key: Arc<str>,
-    inner: AssetHandleInner<A>,
+    path: Option<Arc<str>>,
+    id: Option<AssetId>,
+    state: AssetHandleState<A>,
 }
 
 impl<A> AssetHandle<A>
@@ -475,26 +515,31 @@ where
 
     pub fn get_impl(&mut self, waker: impl FnOnce() -> Option<Waker>) -> Option<AssetResult<A>> {
         loop {
-            match &self.inner {
-                AssetHandleInner::Asset(asset) => {
+            match &self.state {
+                AssetHandleState::Asset { asset } => {
                     return Some(AssetResult {
-                        key: self.key.clone(),
-                        inner: AssetResultInner::Asset(asset.clone()),
+                        path: self.path.clone(),
+                        id: self.id.clone(),
+                        state: AssetResultState::Asset(asset.clone()),
                     })
                 }
-                AssetHandleInner::Error(err) => {
+                AssetHandleState::Error { error } => {
                     return Some(AssetResult {
-                        key: self.key.clone(),
-                        inner: AssetResultInner::Error(err.clone()),
+                        path: self.path.clone(),
+                        id: self.id.clone(),
+                        state: AssetResultState::Error(error.clone()),
                     })
                 }
-                AssetHandleInner::Searching {
-                    path,
+                AssetHandleState::Searching {
                     path_shard,
                     key_hash,
                     shards,
                     random_state,
                 } => {
+                    let path = self
+                        .path
+                        .as_deref()
+                        .expect("This state is only reachable when asset is requested with path");
                     let mut locked_shard = path_shard.lock();
                     let asset_entry = locked_shard
                         .raw_entry_mut()
@@ -504,10 +549,11 @@ where
                         RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
                             PathAssetState::Missing => {
                                 drop(locked_shard);
-                                self.inner = AssetHandleInner::Missing;
+                                self.state = AssetHandleState::Missing;
                                 return Some(AssetResult {
-                                    key: self.key.clone(),
-                                    inner: AssetResultInner::Missing,
+                                    path: self.path.clone(),
+                                    id: self.id.clone(),
+                                    state: AssetResultState::Missing,
                                 });
                             }
                             PathAssetState::Unloaded { wakers } => {
@@ -516,6 +562,7 @@ where
                             }
                             PathAssetState::Loaded { id } => {
                                 let id = *id;
+                                self.id = Some(id);
                                 let mut hasher = random_state.build_hasher();
                                 hash_id_key::<A, _>(id, &mut hasher);
                                 let key_hash = hasher.finish();
@@ -524,11 +571,7 @@ where
 
                                 drop(locked_shard);
 
-                                self.inner = AssetHandleInner::Loading {
-                                    id,
-                                    key_hash,
-                                    shard,
-                                };
+                                self.state = AssetHandleState::Loading { key_hash, shard };
                             }
                         },
                         RawEntryMut::Vacant(_) => {
@@ -536,39 +579,41 @@ where
                         }
                     }
                 }
-                AssetHandleInner::Missing => {
+                AssetHandleState::Missing => {
                     return Some(AssetResult {
-                        key: self.key.clone(),
-                        inner: AssetResultInner::Missing,
+                        path: self.path.clone(),
+                        id: self.id.clone(),
+                        state: AssetResultState::Missing,
                     })
                 }
-                AssetHandleInner::Loading {
-                    id,
-                    key_hash,
-                    shard,
-                } => {
+                AssetHandleState::Loading { key_hash, shard } => {
+                    let id = self
+                        .id
+                        .expect("This state can be reached only with known id");
                     let mut locked_shard = shard.lock();
                     let asset_entry = locked_shard
                         .raw_entry_mut()
-                        .from_hash(*key_hash, |k| k.eq_key::<A>(*id));
+                        .from_hash(*key_hash, |k| k.eq_key::<A>(id));
 
                     return match asset_entry {
                         RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
                             AssetState::Error(err) => {
                                 let err = err.clone();
                                 drop(locked_shard);
-                                self.inner = AssetHandleInner::Error(err.clone());
+                                self.state = AssetHandleState::Error { error: err.clone() };
                                 Some(AssetResult {
-                                    key: self.key.clone(),
-                                    inner: AssetResultInner::Error(err),
+                                    path: self.path.clone(),
+                                    id: self.id.clone(),
+                                    state: AssetResultState::Error(err),
                                 })
                             }
                             AssetState::Missing => {
                                 drop(locked_shard);
-                                self.inner = AssetHandleInner::Missing;
+                                self.state = AssetHandleState::Missing;
                                 Some(AssetResult {
-                                    key: self.key.clone(),
-                                    inner: AssetResultInner::Missing,
+                                    path: self.path.clone(),
+                                    id: self.id.clone(),
+                                    state: AssetResultState::Missing,
                                 })
                             }
                             AssetState::Unloaded { wakers } => {
@@ -581,18 +626,21 @@ where
                                     StateTyped::Asset { asset, .. } => {
                                         let asset = asset.clone();
                                         drop(locked_shard);
-                                        self.inner = AssetHandleInner::Asset(asset.clone());
+                                        self.state = AssetHandleState::Asset {
+                                            asset: asset.clone(),
+                                        };
                                         Some(AssetResult {
-                                            key: self.key.clone(),
-                                            inner: AssetResultInner::Asset(asset),
+                                            path: self.path.clone(),
+                                            id: self.id.clone(),
+                                            state: AssetResultState::Asset(asset),
                                         })
                                     }
                                     StateTyped::Decoded { .. } => {
                                         drop(locked_shard);
                                         Some(AssetResult {
-                                            key: self.key.clone(),
-                                            inner: AssetResultInner::Decoded {
-                                                id: *id,
+                                            path: self.path.clone(),
+                                            id: self.id.clone(),
+                                            state: AssetResultState::Decoded {
                                                 key_hash: *key_hash,
                                                 shard: shard.clone(),
                                             },
@@ -629,10 +677,186 @@ where
     }
 }
 
+pub struct AssetLookup {
+    path_key: PathKey,
+    state: AssetLookupState,
+}
+
+enum AssetLookupState {
+    AssetId {
+        id: AssetId,
+    },
+    Missing,
+    Searching {
+        key_hash: u64,
+        path_shard: PathShard,
+    },
+}
+
+impl AssetLookup {
+    pub fn get_ready(&mut self) -> Option<Result<AssetId, NotFound>> {
+        self.get_impl(|| None)
+    }
+
+    pub fn get_impl(
+        &mut self,
+        waker: impl FnOnce() -> Option<Waker>,
+    ) -> Option<Result<AssetId, NotFound>> {
+        loop {
+            match &self.state {
+                AssetLookupState::AssetId { id } => return Some(Ok(*id)),
+                AssetLookupState::Searching {
+                    path_shard,
+                    key_hash,
+                } => {
+                    let mut locked_shard = path_shard.lock();
+                    let asset_entry = locked_shard
+                        .raw_entry_mut()
+                        .from_key_hashed_nocheck(*key_hash, &self.path_key);
+
+                    match asset_entry {
+                        RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
+                            PathAssetState::Missing => {
+                                drop(locked_shard);
+                                self.state = AssetLookupState::Missing;
+                                return Some(Err(NotFound {
+                                    path: Some(self.path_key.path.clone()),
+                                    id: None,
+                                }));
+                            }
+                            PathAssetState::Unloaded { wakers } => {
+                                waker().map(|waker| wakers.push(waker));
+                                return None;
+                            }
+                            PathAssetState::Loaded { id } => {
+                                let id = *id;
+                                drop(locked_shard);
+
+                                self.state = AssetLookupState::AssetId { id };
+                            }
+                        },
+                        RawEntryMut::Vacant(_) => {
+                            unreachable!()
+                        }
+                    }
+                }
+                AssetLookupState::Missing => {
+                    return Some(Err(NotFound {
+                        path: Some(self.path_key.path.clone()),
+                        id: None,
+                    }))
+                }
+            }
+        }
+    }
+}
+
+impl Unpin for AssetLookup {}
+
+impl Future for AssetLookup {
+    type Output = Result<AssetId, NotFound>;
+
+    fn poll(self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Result<AssetId, NotFound>> {
+        let me = self.get_mut();
+
+        match me.get_impl(|| Some(ctx.waker().clone())) {
+            None => Poll::Pending,
+            Some(result) => Poll::Ready(result),
+        }
+    }
+}
+
 impl Loader {
     /// Returns [`LoaderBuilder`] instance
     pub fn builder() -> LoaderBuilder {
         LoaderBuilder::new()
+    }
+
+    /// Lookups for the asset id by key string.
+    pub fn lookup<A>(&self, path: &str) -> AssetLookup
+    where
+        A: Asset,
+    {
+        // Hash asset path key.
+        let mut hasher = self.random_state.build_hasher();
+        hash_path_key::<A, _>(path, &mut hasher);
+        let key_hash = hasher.finish();
+
+        // Use asset key hash to pick a shard.
+        // It will always pick same shard for same key.
+        let shards_len = self.path_cache.len();
+        let path_shard = &self.path_cache[(key_hash as usize % shards_len)];
+
+        // Lock picked shard.
+        let mut locked_shard = path_shard.lock();
+
+        // Find an entry into sharded hashmap.
+        let asset_entry = locked_shard
+            .raw_entry_mut()
+            .from_hash(key_hash, |k| k.eq_key::<A>(path));
+
+        match asset_entry {
+            RawEntryMut::Occupied(entry) => {
+                // Already queried. See status.
+
+                let path_key = entry.key().clone();
+                match entry.get() {
+                    PathAssetState::Missing => AssetLookup {
+                        path_key,
+                        state: AssetLookupState::Missing,
+                    },
+                    PathAssetState::Unloaded { .. } => {
+                        drop(locked_shard);
+
+                        AssetLookup {
+                            path_key,
+                            state: AssetLookupState::Searching {
+                                key_hash,
+                                path_shard: path_shard.clone(),
+                            },
+                        }
+                    }
+                    PathAssetState::Loaded { id } => AssetLookup {
+                        path_key,
+                        state: AssetLookupState::AssetId { id: *id },
+                    },
+                }
+            }
+            RawEntryMut::Vacant(entry) => {
+                let path_key = PathKey::new::<A>(path.into());
+                let path = path_key.path.clone();
+
+                // Register query
+                let _ = entry.insert_hashed_nocheck(
+                    key_hash,
+                    path_key.clone(),
+                    PathAssetState::Unloaded {
+                        wakers: WakeOnDrop::new(),
+                    },
+                );
+                drop(locked_shard);
+
+                let loader = self.clone();
+                let path_shard = path_shard.clone();
+
+                let handle = AssetLookup {
+                    path_key,
+                    state: AssetLookupState::Searching {
+                        key_hash,
+                        path_shard: path_shard.clone(),
+                    },
+                };
+
+                tokio::spawn(
+                    async move {
+                        find_asset_task::<A>(&loader, path_shard, key_hash, &path).await;
+                    }
+                    .in_current_span(),
+                );
+
+                handle
+            }
+        }
     }
 
     /// Load asset with specified id and returns handle
@@ -681,20 +905,22 @@ impl Loader {
 
                 match asset_entry {
                     RawEntryMut::Occupied(entry) => {
-                        let path = entry.key().path.clone();
+                        // Already queried. See status.
+
+                        let path_key = entry.key().clone();
                         match entry.get() {
-                            // Already queried. See status.
                             PathAssetState::Missing => AssetHandle {
-                                key: path,
-                                inner: AssetHandleInner::Missing,
+                                path: Some(path_key.path.clone()),
+                                id: None,
+                                state: AssetHandleState::Missing,
                             },
                             PathAssetState::Unloaded { .. } => {
                                 drop(locked_shard);
 
                                 AssetHandle {
-                                    key: path.clone(),
-                                    inner: AssetHandleInner::Searching {
-                                        path: path,
+                                    path: Some(path_key.path),
+                                    id: None,
+                                    state: AssetHandleState::Searching {
                                         key_hash,
                                         path_shard: path_shard.clone(),
                                         shards: self.cache.clone(),
@@ -717,9 +943,9 @@ impl Loader {
                                 let shard = &self.cache[(key_hash as usize % shards_len)];
 
                                 AssetHandle {
-                                    key: path,
-                                    inner: AssetHandleInner::Loading {
-                                        id,
+                                    path: Some(path_key.path.clone()),
+                                    id: Some(id),
+                                    state: AssetHandleState::Loading {
                                         key_hash,
                                         shard: shard.clone(),
                                     },
@@ -728,13 +954,13 @@ impl Loader {
                         }
                     }
                     RawEntryMut::Vacant(entry) => {
-                        let asset_key = PathKey::new::<A>(path.into());
-                        let path = asset_key.path.clone();
+                        let path_key = PathKey::new::<A>(path.into());
+                        let path = path_key.path.clone();
 
                         // Register query
                         let _ = entry.insert_hashed_nocheck(
                             key_hash,
-                            asset_key,
+                            path_key.clone(),
                             PathAssetState::Unloaded {
                                 wakers: WakeOnDrop::new(),
                             },
@@ -745,9 +971,9 @@ impl Loader {
                         let path_shard = path_shard.clone();
 
                         let handle = AssetHandle {
-                            key: path.clone(),
-                            inner: AssetHandleInner::Searching {
-                                path: path.clone(),
+                            path: Some(path_key.path),
+                            id: None,
+                            state: AssetHandleState::Searching {
                                 key_hash,
                                 path_shard: path_shard.clone(),
                                 shards: self.cache.clone(),
@@ -785,24 +1011,24 @@ impl Loader {
                     .raw_entry_mut()
                     .from_hash(key_hash, |k| k.eq_key::<A>(id));
 
-                let key = id.to_string().into();
-
                 match asset_entry {
                     RawEntryMut::Occupied(entry) => {
                         match entry.get() {
                             // Already queried. See status.
                             AssetState::Error(err) => AssetHandle {
-                                key,
-                                inner: AssetHandleInner::Error(err.clone()),
+                                path: None,
+                                id: Some(id),
+                                state: AssetHandleState::Error { error: err.clone() },
                             },
                             AssetState::Missing => AssetHandle {
-                                key,
-                                inner: AssetHandleInner::Missing,
+                                path: None,
+                                id: Some(id),
+                                state: AssetHandleState::Missing,
                             },
                             AssetState::Unloaded { .. } => AssetHandle {
-                                key,
-                                inner: AssetHandleInner::Loading {
-                                    id,
+                                path: None,
+                                id: Some(id),
+                                state: AssetHandleState::Loading {
                                     key_hash,
                                     shard: shard.clone(),
                                 },
@@ -812,13 +1038,16 @@ impl Loader {
                                     <dyn Any>::downcast_ref(&**typed).unwrap();
                                 match typed {
                                     StateTyped::Asset { asset, .. } => AssetHandle {
-                                        key,
-                                        inner: AssetHandleInner::Asset(asset.clone()),
+                                        path: None,
+                                        id: Some(id),
+                                        state: AssetHandleState::Asset {
+                                            asset: asset.clone(),
+                                        },
                                     },
                                     StateTyped::Decoded { .. } => AssetHandle {
-                                        key,
-                                        inner: AssetHandleInner::Loading {
-                                            id,
+                                        path: None,
+                                        id: Some(id),
+                                        state: AssetHandleState::Loading {
                                             key_hash,
                                             shard: shard.clone(),
                                         },
@@ -844,9 +1073,9 @@ impl Loader {
                         let shard = shard.clone();
 
                         let handle = AssetHandle {
-                            key,
-                            inner: AssetHandleInner::Loading {
-                                id,
+                            path: None,
+                            id: Some(id),
+                            state: AssetHandleState::Loading {
                                 key_hash,
                                 shard: shard.clone(),
                             },
