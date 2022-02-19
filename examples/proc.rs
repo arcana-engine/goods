@@ -80,8 +80,8 @@ pub struct AssetWithOption {
     foo: Option<SimpleAsset>,
 }
 
-#[derive(Clone, serde::Deserialize)]
-struct SimpleFieldType {}
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct SimpleFieldType {}
 
 /// Dummy source which just gives bytes from map.
 struct HashMapSource(HashMap<AssetId, Box<[u8]>>);

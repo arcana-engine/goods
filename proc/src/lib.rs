@@ -152,10 +152,10 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                 Some(ident) => {
                     info_fields.extend(quote::quote!(
                         #(#serde_attributes)*
-                        #ident: #ty,
+                        pub #ident: #ty,
                     ));
-                    futures_fields.extend(quote::quote!(#ident: #ty,));
-                    decoded_fields.extend(quote::quote!(#ident: #ty,));
+                    futures_fields.extend(quote::quote!(pub #ident: #ty,));
+                    decoded_fields.extend(quote::quote!(pub #ident: #ty,));
                     info_to_futures_fields.extend(quote::quote!(#ident: info.#ident,));
                     futures_to_decoded_fields.extend(quote::quote!(#ident: futures.#ident,));
                     decoded_to_asset_fields.extend(quote::quote!(#ident: decoded.#ident,));
@@ -163,10 +163,10 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                 None => {
                     info_fields.extend(quote::quote!(
                         #(#serde_attributes)*
-                        #ty,
+                        pub #ty,
                     ));
-                    futures_fields.extend(quote::quote!(#ty,));
-                    decoded_fields.extend(quote::quote!(#ty,));
+                    futures_fields.extend(quote::quote!(pub #ty,));
+                    decoded_fields.extend(quote::quote!(pub #ty,));
                     info_to_futures_fields.extend(quote::quote!(info.#index,));
                     futures_to_decoded_fields.extend(quote::quote!(futures.#index,));
                     decoded_to_asset_fields.extend(quote::quote!(decoded.#index,));
@@ -270,13 +270,13 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                             quote::quote!(#as_type: ::goods::AssetFieldBuild<#kind, BuilderGenericParameter>,),
                         );
                         info_fields.extend(
-                            quote::quote!(#ident: <#as_type as ::goods::AssetField<#kind>>::Info,),
+                            quote::quote!(pub #ident: <#as_type as ::goods::AssetField<#kind>>::Info,),
                         );
                         futures_fields.extend(
-                            quote::quote!(#ident: <#as_type as ::goods::AssetField<#kind>>::Fut,),
+                            quote::quote!(pub #ident: <#as_type as ::goods::AssetField<#kind>>::Fut,),
                         );
                         decoded_fields
-                            .extend(quote::quote!(#ident: <#as_type as ::goods::AssetField<#kind>>::Decoded,));
+                            .extend(quote::quote!(pub #ident: <#as_type as ::goods::AssetField<#kind>>::Decoded,));
                         info_to_futures_fields
                             .extend(quote::quote!(#ident: <#as_type as ::goods::AssetField<#kind>>::decode(info.#ident, loader),));
                         futures_to_decoded_fields
@@ -308,12 +308,14 @@ fn parse(item: proc_macro::TokenStream) -> syn::Result<Parsed> {
                         builder_bounds.extend(
                             quote::quote!(#as_type: ::goods::AssetFieldBuild<#kind, BuilderGenericParameter>,),
                         );
-                        info_fields
-                            .extend(quote::quote!(<#as_type as ::goods::AssetField<#kind>>::Info,));
-                        futures_fields
-                            .extend(quote::quote!(<#as_type as ::goods::AssetField<#kind>>::Fut,));
+                        info_fields.extend(
+                            quote::quote!(pub <#as_type as ::goods::AssetField<#kind>>::Info,),
+                        );
+                        futures_fields.extend(
+                            quote::quote!(pub <#as_type as ::goods::AssetField<#kind>>::Fut,),
+                        );
                         decoded_fields.extend(
-                            quote::quote!(<#as_type as ::goods::AssetField<#kind>>::Decoded,),
+                            quote::quote!(pub <#as_type as ::goods::AssetField<#kind>>::Decoded,),
                         );
                         info_to_futures_fields
                             .extend(quote::quote!(<#as_type as ::goods::AssetField<#kind>>::decode(info.#index, loader),));
@@ -395,6 +397,10 @@ fn asset_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
 
     let tokens = match data_struct.fields {
         syn::Fields::Unit => quote::quote! {
+            #[derive(::goods::serde::Serialize, ::goods::serde::Deserialize)]
+            #(#serde_attributes)*
+            pub struct #info;
+
             impl ::goods::TrivialAsset for #ty {
                 type Error = ::std::convert::Infallible;
 
@@ -406,14 +412,34 @@ fn asset_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
                     ::std::result::Result::Ok(#ty)
                 }
             }
+
+            impl ::goods::AssetField<::goods::Container> for #ty {
+                type BuildError = ::std::convert::Infallible;
+                type DecodeError = ::std::convert::Infallible;
+                type Info = #info;
+                type Decoded = Self;
+                type Fut = ::std::future::Ready<Result<Self, ::std::convert::Infallible>>;
+
+                fn decode(info: #info, _: &::goods::Loader) -> Self::Fut {
+                    use ::std::{future::ready, result::Result::Ok};
+
+                    ready(Ok(#ty))
+                }
+            }
+
+            impl<BuilderGenericParameter> ::goods::AssetFieldBuild<::goods::Container, BuilderGenericParameter> for #ty {
+                fn build(decoded: Self, builder: &mut BuilderGenericParameter) -> Result<Self, ::std::convert::Infallible> {
+                    ::std::result::Result::Ok(decoded)
+                }
+            }
         },
         syn::Fields::Unnamed(_) => todo!("Not yet implemented"),
         syn::Fields::Named(_) if complex => quote::quote! {
-            #[derive(::goods::serde::Deserialize)]
+            #[derive(::goods::serde::Serialize, ::goods::serde::Deserialize)]
             #(#serde_attributes)*
-            struct #info { #info_fields }
+            pub struct #info { #info_fields }
 
-            struct #futures { #futures_fields }
+            pub struct #futures { #futures_fields }
 
             pub struct #decoded { #decoded_fields }
 
@@ -489,8 +515,45 @@ fn asset_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
                     })
                 }
             }
+
+            impl ::goods::AssetField<::goods::Container> for #ty {
+                type BuildError = #build_error;
+                type DecodeError = #decode_error;
+                type Info = #info;
+                type Decoded = #decoded;
+                type Fut = ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = Result<#decoded, #decode_error>> + Send>>;
+
+                fn decode(info: #info, loader: &::goods::Loader) -> Self::Fut {
+                    use ::std::{boxed::Box, result::Result::Ok};
+
+                    struct #futures { #futures_fields }
+
+                    let futures = #futures {
+                        #info_to_futures_fields
+                    };
+
+                    Box::pin(async move {Ok(#decoded {
+                        #futures_to_decoded_fields
+                    })})
+                }
+            }
+
+            impl<BuilderGenericParameter> ::goods::AssetFieldBuild<::goods::Container, BuilderGenericParameter> for #ty
+            where
+                #builder_bounds
+            {
+                fn build(decoded: #decoded, builder: &mut BuilderGenericParameter) -> Result<Self, #build_error> {
+                    ::std::result::Result::Ok(#ty {
+                        #decoded_to_asset_fields
+                    })
+                }
+            }
         },
         syn::Fields::Named(_) => quote::quote! {
+            #[derive(::goods::serde::Serialize, ::goods::serde::Deserialize)]
+            #(#serde_attributes)*
+            pub struct #info { #info_fields }
+
             impl ::goods::TrivialAsset for #ty {
                 type Error = ::goods::DecodeError;
 
@@ -500,10 +563,6 @@ fn asset_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
 
                 fn decode(bytes: ::std::boxed::Box<[u8]>) -> Result<Self, ::goods::DecodeError> {
                     use {::std::result::Result::{Ok, Err}, ::goods::serde_json::error::Category};
-
-                    #[derive(::goods::serde::Deserialize)]
-                    #(#serde_attributes)*
-                    struct #info { #info_fields }
 
                     /// Zero-length is definitely bincode.
                     let decoded: #info = if bytes.is_empty()  {
@@ -530,6 +589,30 @@ fn asset_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
                     Ok(#ty {
                         #decoded_to_asset_fields
                     })
+                }
+            }
+
+            impl ::goods::AssetField<::goods::Container> for #ty {
+                type BuildError = ::std::convert::Infallible;
+                type DecodeError = ::std::convert::Infallible;
+                type Info = #info;
+                type Decoded = Self;
+                type Fut = ::std::future::Ready<Result<Self, ::std::convert::Infallible>>;
+
+                fn decode(info: #info, _: &::goods::Loader) -> Self::Fut {
+                    use ::std::{future::ready, result::Result::Ok};
+
+                    let decoded = info;
+
+                    ready(Ok(#ty {
+                        #decoded_to_asset_fields
+                    }))
+                }
+            }
+
+            impl<BuilderGenericParameter> ::goods::AssetFieldBuild<::goods::Container, BuilderGenericParameter> for #ty {
+                fn build(decoded: Self, builder: &mut BuilderGenericParameter) -> Result<Self, ::std::convert::Infallible> {
+                    ::std::result::Result::Ok(decoded)
                 }
             }
         },
@@ -576,7 +659,7 @@ fn asset_field_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
 
     let tokens = match data_struct.fields {
         syn::Fields::Unit => quote::quote! {
-            #[derive(::goods::serde::Deserialize)]
+            #[derive(::goods::serde::Serialize, ::goods::serde::Deserialize)]
             #(#serde_attributes)*
             pub struct #info;
 
@@ -603,7 +686,7 @@ fn asset_field_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
 
         syn::Fields::Unnamed(_) => todo!("Not yet implemented"),
         syn::Fields::Named(_) if complex => quote::quote! {
-            #[derive(::goods::serde::Deserialize)]
+            #[derive(::goods::serde::Serialize, ::goods::serde::Deserialize)]
             #(#serde_attributes)*
             pub struct #info { #info_fields }
 
@@ -653,7 +736,7 @@ fn asset_field_impl(parsed: Parsed) -> syn::Result<proc_macro2::TokenStream> {
             }
         },
         syn::Fields::Named(_) => quote::quote! {
-            #[derive(::goods::serde::Deserialize)]
+            #[derive(::goods::serde::Serialize, ::goods::serde::Deserialize)]
             #(#serde_attributes)*
             pub struct #info { #info_fields }
 
