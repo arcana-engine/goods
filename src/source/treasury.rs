@@ -71,7 +71,7 @@ impl Source for TreasurySource {
                 Box::pin(async move {
                     match treasury.lock().await.find(&url, &asset).await {
                         Ok(None) => None,
-                        Ok(Some(tid)) => {
+                        Ok(Some((tid, _))) => {
                             let id = AssetId(tid.value());
                             Some(id)
                         }

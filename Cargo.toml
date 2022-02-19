@@ -16,7 +16,7 @@ treasury = ["treasury-client", "eyre", "url", "dunce"]
 
 [dependencies]
 goods-proc = { version = "=0.2.0", path = "proc" }
-treasury-client = { version = "0.1.0", optional = true }
+treasury-client = { version = "0.2.0", optional = true }
 thiserror = "1.0"
 smallvec = "1.7"
 serde = { version = "1.0", features = ["derive"] }
@@ -26,6 +26,7 @@ ahash = "0.7"
 hashbrown = "0.12"
 futures = "0.3"
 parking_lot = "0.12"
+spin = "0.9"
 tracing = "0.1"
 num_cpus = "1.0"
 tokio = { version =  "1.0", features = ["rt", "sync", "parking_lot"] }

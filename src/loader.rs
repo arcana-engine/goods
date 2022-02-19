@@ -12,7 +12,7 @@ use std::{
 use ahash::RandomState;
 use futures::future::{BoxFuture, TryFutureExt as _};
 use hashbrown::hash_map::{HashMap, RawEntryMut};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use smallvec::SmallVec;
 use tracing::Instrument;
 
@@ -258,6 +258,12 @@ pub struct Loader {
     path_cache: Arc<[PathShard]>,
 }
 
+struct DecodedState<A: Asset> {
+    decoded: Option<A::Decoded>,
+    version: u64,
+    source: usize,
+}
+
 enum StateTyped<A: Asset> {
     #[allow(dead_code)]
     Asset {
@@ -266,9 +272,7 @@ enum StateTyped<A: Asset> {
         source: usize,
     },
     Decoded {
-        decoded: Option<A::Decoded>,
-        version: u64,
-        source: usize,
+        lock: Arc<spin::Mutex<DecodedState<A>>>, // Spin-lock is cheap. Expect near zero contention.
     },
 }
 
@@ -345,42 +349,104 @@ where
                 .from_hash(*key_hash, |k| k.eq_key::<A>(id));
 
             match entry {
-                RawEntryMut::Vacant(_) => unreachable!(),
+                RawEntryMut::Vacant(_) => {
+                    unreachable!("AssetResult existence guarantee entry is not vacant")
+                }
                 RawEntryMut::Occupied(mut entry) => match entry.get_mut() {
                     AssetState::Typed(typed) => {
                         let typed: &mut StateTyped<A> = typed.downcast_mut().unwrap();
 
                         match typed {
-                            StateTyped::Decoded {
-                                decoded,
-                                version,
-                                source,
-                            } => match decoded.take() {
-                                Some(decoded) => match A::build(decoded, builder) {
-                                    Ok(asset) => {
-                                        *typed = StateTyped::Asset {
-                                            asset: asset.clone(),
-                                            version: *version,
-                                            source: *source,
-                                        };
-                                        drop(locked_shard);
-                                        *self = AssetResultState::Asset(asset);
+                            StateTyped::Decoded { lock } => {
+                                // This spin-lock is for deadlock and poisoning avoidance.
+                                let lock = lock.clone();
+
+                                let (res, state) = MutexGuard::unlocked(&mut locked_shard, || {
+                                    // Lock asset not under shard lock.
+                                    let mut state = lock.lock();
+                                    match state.decoded.take() {
+                                        Some(decoded) => (
+                                            Some((
+                                                A::build(decoded, builder),
+                                                state.version,
+                                                state.source,
+                                            )),
+                                            state,
+                                        ),
+                                        None => (None, state),
                                     }
-                                    Err(err) => {
-                                        let err = Error::new(err);
-                                        *entry.get_mut() = AssetState::Error(err.clone());
-                                        drop(locked_shard);
-                                        *self = AssetResultState::Error(err);
+                                });
+
+                                // Unlock asset under shard lock
+                                drop(state);
+
+                                // Visit entry again
+                                let entry = locked_shard
+                                    .raw_entry_mut()
+                                    .from_hash(*key_hash, |k| k.eq_key::<A>(id));
+
+                                match entry {
+                                    RawEntryMut::Vacant(_) => unreachable!(
+                                        "AssetResult existence guarantee entry is not vacant"
+                                    ),
+                                    RawEntryMut::Occupied(mut entry) => {
+                                        match res {
+                                            None => {
+                                                match entry.get_mut() {
+                                                    AssetState::Typed(typed) => {
+                                                        let typed: &mut StateTyped<A> =
+                                                            typed.downcast_mut().unwrap();
+            
+                                                        match typed {
+                                                            StateTyped::Asset { asset, .. } => {
+                                                                        let asset = asset.clone();
+                                                                        drop(locked_shard);
+                                                                        *self = AssetResultState::Asset(asset.clone());
+                                                                    }
+                                                            _ => unreachable!("Decode state was taken. Another thread finished building the asset"),
+                                                        }
+                                                    }
+                                                    AssetState::Error(err) => {
+                                                        // Already failed
+                                                        let err = err.clone();
+                                                        drop(locked_shard);
+                                                        *self = AssetResultState::Error(err);
+                                                    }
+                                                    _ => unreachable!("It was in `Typed` state. It can be changed to `Error` only"),
+                                                }
+                                            }
+                                            Some((Ok(asset), version, source)) => {
+                                                match entry.get_mut() {
+                                                    AssetState::Typed(typed) => {
+                                                        let typed: &mut StateTyped<A> =
+                                                            typed.downcast_mut().unwrap();
+        
+                                                        // Successful asset build
+                                                        *typed = StateTyped::Asset {
+                                                            asset: asset.clone(),
+                                                            version,
+                                                            source,
+                                                        };
+                                                        drop(locked_shard);
+                                                        *self = AssetResultState::Asset(asset);
+                                                    }
+                                                    _ => unreachable!("Decode state was taken be this thread"),
+                                                }
+
+                                            }
+                                            Some((Err(err), _, _)) => {
+                                                // Build failed
+                                                let err = Error::new(err);
+                                                *entry.get_mut() = AssetState::Error(err.clone());
+                                                drop(locked_shard);
+                                                *self = AssetResultState::Error(err);
+                                            }
+                                        }
                                     }
-                                },
-                                None => {
-                                    let err = Error::new(AssetResultPoisoned);
-                                    *entry.get_mut() = AssetState::Error(err.clone());
-                                    drop(locked_shard);
-                                    *self = AssetResultState::Error(err);
                                 }
-                            },
+                            }
                             StateTyped::Asset { asset, .. } => {
+                                // Already built
                                 let asset = asset.clone();
                                 drop(locked_shard);
                                 *self = AssetResultState::Asset(asset);
@@ -388,6 +454,7 @@ where
                         }
                     }
                     AssetState::Error(err) => {
+                        // Already failed
                         let err = err.clone();
                         drop(locked_shard);
                         *self = AssetResultState::Error(err);
@@ -1107,9 +1174,11 @@ async fn load_asset_task<A: Asset>(loader: &Loader, shard: Shard, key_hash: u64,
                 Err(err) => AssetState::Error(Error::new(err)),
                 Ok(decoded) => {
                     let typed = StateTyped::<A>::Decoded {
-                        decoded: Some(decoded),
-                        version: data.version,
-                        source: data.source,
+                        lock: Arc::new(spin::Mutex::new(DecodedState {
+                            decoded: Some(decoded),
+                            version: data.version,
+                            source: data.source,
+                        })),
                     };
 
                     AssetState::Typed(Box::new(typed))
